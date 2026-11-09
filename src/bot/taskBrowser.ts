@@ -20,7 +20,7 @@ export const MENU = {
   tasks: "📋 Мои задачи",
   queue: "🤖 Взять в работу",
   status: "📊 Статус",
-  budget: "💰 Бюджет",
+  limits: "⚡️ Лимиты",
   stop: "⏹ Стоп",
   help: "❓ Помощь",
 } as const;
@@ -31,7 +31,7 @@ export function mainMenuKeyboard(): Keyboard {
     .text(MENU.queue)
     .row()
     .text(MENU.status)
-    .text(MENU.budget)
+    .text(MENU.limits)
     .row()
     .text(MENU.stop)
     .text(MENU.help)

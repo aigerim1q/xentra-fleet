@@ -76,7 +76,7 @@ const HELP_TEXT = [
   "/kill — немедленно прерву текущий ход (если завис или делает не то)",
   "/status — расскажу, что сейчас происходит, расход, последний обработанный тикет",
   "/metrics — исторический трек-рекорд: доля задач без эскалации, средние стоимость/время/раунды ревью",
-  "/budget — расход/число задач за сегодня относительно дневных лимитов",
+  "/limits или «⚡️ Лимиты» — сколько лимитов на сегодня уже использовано (оценка по токенам, не деньги)",
   "/peek — покажу следующий тикет в очереди, не запуская его",
   "/retry XEN-123 — верну тикет, застрявший в «нужен человек», обратно в очередь",
   "«нужен человек» — сразу присылаю diff с кнопками ✅ Принять/❌ Отклонить: можно запушить уже сделанную работу вручную, даже если сам я сдался",
@@ -460,7 +460,7 @@ export async function startBot(): Promise<void> {
   bot.hears(MENU.tasks, (ctx) => showTaskList(ctx, 0, false));
   bot.hears(MENU.queue, (ctx) => sendTicketMenu(ctx, undefined, { resume: true }));
   bot.hears(MENU.status, (ctx) => handleStatus(ctx));
-  bot.hears(MENU.budget, (ctx) => handleBudget(ctx));
+  bot.hears(MENU.limits, (ctx) => handleBudget(ctx));
   bot.hears(MENU.stop, (ctx) => handleStop(ctx));
   bot.hears(MENU.help, (ctx) => handleHelp(ctx));
 
@@ -605,15 +605,22 @@ export async function startBot(): Promise<void> {
     const todayIso = startOfTodayIso();
     const spent = costSince(state, todayIso);
     const tasks = countSince(state, todayIso);
+    const pct = config.dailyBudgetUsd > 0 ? Math.min(100, Math.round((spent / config.dailyBudgetUsd) * 100)) : 0;
     const lines = [
-      "💰 Бюджет",
-      `потратил сегодня: $${spent.toFixed(4)} / $${config.dailyBudgetUsd}`,
-      `задач сегодня: ${tasks} / ${config.maxTasksPerDay}`,
-      `лимит на задачу: $${config.maxBudgetUsd}, ${config.maxIterations} итераций`,
+      "⚡️ Лимиты на сегодня",
+      `объём работы: ${pct}% дневного лимита (≈$${spent.toFixed(2)} из $${config.dailyBudgetUsd})`,
+      `задач: ${tasks} из ${config.maxTasksPerDay}`,
+      "",
+      "На одну задачу",
+      `объём: до ≈$${config.maxBudgetUsd}, попыток пройти проверки: до ${config.maxIterations}`,
+      "",
+      "$ — оценка по токенам, не реальные деньги: бот работает на твоей подписке",
+      "и тратит её общую квоту. Лимит дошёл — бот ждёт следующего дня или тебя.",
     ];
     await ctx.reply(lines.join("\n"));
   }
-  bot.command("budget", handleBudget);
+  bot.command("limits", handleBudget);
+  bot.command("budget", handleBudget); // old name, kept so muscle memory still works
 
   async function handlePeek(ctx: Context): Promise<void> {
     try {
@@ -1030,7 +1037,7 @@ export async function startBot(): Promise<void> {
       { command: "start", description: "Меню и задачи для бота" },
       { command: "tasks", description: "Все мои задачи, смена статуса" },
       { command: "status", description: "Что сейчас происходит" },
-      { command: "budget", description: "Расход за сегодня" },
+      { command: "limits", description: "Лимиты на сегодня" },
       { command: "stop", description: "Остановить очередь" },
       { command: "help", description: "Помощь" },
     ])
