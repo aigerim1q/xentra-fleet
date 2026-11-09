@@ -8,6 +8,12 @@ export interface JiraIssue {
   status?: string;
 }
 
+export interface JiraTransition {
+  id: string;
+  name: string;
+  toStatus: string;
+}
+
 interface AdfNode {
   text?: string;
   content?: AdfNode[];
@@ -47,9 +53,9 @@ export class JiraClient {
     return res.status === 204 ? null : res.json();
   }
 
-  async searchIssues(jql: string): Promise<JiraIssue[]> {
+  async searchIssues(jql: string, maxResults = 50): Promise<JiraIssue[]> {
     const data = (await this.request(
-      `/rest/api/2/search?jql=${encodeURIComponent(jql)}&fields=summary,description,status&maxResults=50`,
+      `/rest/api/2/search?jql=${encodeURIComponent(jql)}&fields=summary,description,status&maxResults=${maxResults}`,
     )) as { issues: Array<{ key: string; fields: { summary: string; description: unknown; status: { name: string } } }> };
     return data.issues.map((issue) => ({
       key: issue.key,
@@ -70,6 +76,22 @@ export class JiraClient {
       description: descriptionToText(data.fields.description),
       status: data.fields.status.name,
     };
+  }
+
+  /** Transitions the workflow allows from the issue's current status, for the current user. */
+  async listTransitions(issueKey: string): Promise<JiraTransition[]> {
+    const data = (await this.request(`/rest/api/2/issue/${issueKey}/transitions`)) as {
+      transitions: Array<{ id: string; name: string; to: { name: string } }>;
+    };
+    return data.transitions.map((t) => ({ id: t.id, name: t.name, toStatus: t.to.name }));
+  }
+
+  /** Applies a transition picked from listTransitions — by id, so no name guessing. */
+  async transitionById(issueKey: string, transitionId: string): Promise<void> {
+    await this.request(`/rest/api/2/issue/${issueKey}/transitions`, {
+      method: "POST",
+      body: JSON.stringify({ transition: { id: transitionId } }),
+    });
   }
 
   async transitionTo(issueKey: string, statusName: string): Promise<void> {

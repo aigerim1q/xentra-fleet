@@ -1,4 +1,14 @@
 import { Bot, InlineKeyboard, type Context } from "grammy";
+import { JiraClient } from "../jira/client.js";
+import {
+  CB,
+  MENU,
+  mainMenuKeyboard,
+  myOpenTasksJql,
+  taskCardView,
+  taskListView,
+  transitionsView,
+} from "./taskBrowser.js";
 import { config } from "../config.js";
 import {
   loadState,
@@ -60,7 +70,8 @@ function statusTag(status: string | undefined): string {
 const HELP_TEXT = [
   "Я — твой зам. CEO по тикетам из Jira: слежу за очередью, читаю задачу и предлагаю решение, а как только одобришь — довожу до MR и держу в курсе на каждом шаге.",
   "",
-  "/start — покажу список твоих задач («Сделать» + «В работе») с кнопками, выбери — начну разбираться именно с этой",
+  "/start — меню внизу и список твоих задач («Сделать» + «В работе»): выбери — начну разбираться именно с этой",
+  "/tasks или «📋 Мои задачи» — все твои открытые задачи; в карточке можно сменить статус в Jira или отдать задачу мне",
   "/stop — деактивирую кнопки в уже показанных списках (то, что уже в работе или ждёт твоего решения, не трогаю)",
   "/kill — немедленно прерву текущий ход (если завис или делает не то)",
   "/status — расскажу, что сейчас происходит, расход, последний обработанный тикет",
@@ -405,7 +416,96 @@ export async function startBot(): Promise<void> {
     }
   }
 
-  bot.command("start", (ctx) => sendTicketMenu(ctx, undefined, { resume: true }));
+  bot.command("start", async (ctx) => {
+    await ctx.reply("Меню внизу: задачи, статус, бюджет. Список «взять в работу» — ниже.", {
+      reply_markup: mainMenuKeyboard(),
+    });
+    await sendTicketMenu(ctx, undefined, { resume: true });
+  });
+  bot.command("menu", (ctx) => ctx.reply("Меню открыто.", { reply_markup: mainMenuKeyboard() }));
+
+  // ── Task browser: every open task of mine, a card per task, status changes ──
+  const jira = new JiraClient(config.jira.baseUrl, config.jira.token);
+
+  async function loadMyTasks() {
+    return jira.searchIssues(myOpenTasksJql(config.jira.projectKey), 100);
+  }
+
+  async function showTaskList(ctx: Context, page: number, edit: boolean): Promise<void> {
+    try {
+      const view = taskListView(await loadMyTasks(), page);
+      if (edit && ctx.callbackQuery?.message) {
+        await ctx.editMessageText(view.text, { reply_markup: view.keyboard }).catch(() => {});
+      } else {
+        await ctx.reply(view.text, { reply_markup: view.keyboard });
+      }
+    } catch (err) {
+      await ctx.reply(`❌ Не удалось получить задачи из Jira: ${(err as Error).message}`);
+    }
+  }
+
+  async function showTaskCard(ctx: Context, key: string): Promise<void> {
+    try {
+      const issue = await jira.getIssue(key);
+      const live = getLiveState();
+      const busy = live.currentJob?.issueKey ?? live.pendingApproval?.issueKey ?? live.pendingBrief?.issueKey ?? live.pendingHumanReview?.issueKey;
+      const view = taskCardView(issue, config.jira.baseUrl, { botBusyWith: busy });
+      await ctx.editMessageText(view.text, { reply_markup: view.keyboard }).catch(() => ctx.reply(view.text, { reply_markup: view.keyboard }));
+    } catch (err) {
+      await ctx.reply(`❌ Не удалось открыть ${key}: ${(err as Error).message}`);
+    }
+  }
+
+  bot.command("tasks", (ctx) => showTaskList(ctx, 0, false));
+  bot.hears(MENU.tasks, (ctx) => showTaskList(ctx, 0, false));
+  bot.hears(MENU.queue, (ctx) => sendTicketMenu(ctx, undefined, { resume: true }));
+  bot.hears(MENU.status, (ctx) => handleStatus(ctx));
+  bot.hears(MENU.budget, (ctx) => handleBudget(ctx));
+  bot.hears(MENU.stop, (ctx) => handleStop(ctx));
+  bot.hears(MENU.help, (ctx) => handleHelp(ctx));
+
+  bot.callbackQuery(/^tasks:(\d+)$/, async (ctx) => {
+    await ctx.answerCallbackQuery();
+    await showTaskList(ctx, Number(ctx.match[1]), true);
+  });
+
+  bot.callbackQuery(/^task:(.+)$/, async (ctx) => {
+    await ctx.answerCallbackQuery();
+    await showTaskCard(ctx, ctx.match[1]);
+  });
+
+  bot.callbackQuery(/^st:(.+)$/, async (ctx) => {
+    const key = ctx.match[1];
+    await ctx.answerCallbackQuery();
+    try {
+      const [issue, transitions] = await Promise.all([jira.getIssue(key), jira.listTransitions(key)]);
+      const view = transitionsView(key, issue.status, transitions);
+      await ctx.editMessageText(view.text, { reply_markup: view.keyboard }).catch(() => ctx.reply(view.text, { reply_markup: view.keyboard }));
+    } catch (err) {
+      await ctx.reply(`❌ Не удалось получить статусы ${key}: ${(err as Error).message}`);
+    }
+  });
+
+  bot.callbackQuery(/^tr:([^:]+):(\d+)$/, async (ctx) => {
+    const [key, transitionId] = [ctx.match[1], ctx.match[2]];
+    const live = getLiveState();
+    // The bot moves its own tickets through statuses (in progress → review); a manual
+    // change in the middle of that would leave the ticket and the bot disagreeing.
+    if (live.currentJob?.issueKey === key) {
+      await ctx.answerCallbackQuery({ text: `Над ${key} сейчас работает бот — сначала дождись или /kill.`, show_alert: true });
+      return;
+    }
+    try {
+      const before = (await jira.getIssue(key)).status;
+      await jira.transitionById(key, transitionId);
+      const after = (await jira.getIssue(key)).status;
+      await ctx.answerCallbackQuery({ text: `${key}: ${before} → ${after}` });
+      await showTaskCard(ctx, key);
+    } catch (err) {
+      await ctx.answerCallbackQuery({ text: "Не получилось сменить статус", show_alert: false });
+      await ctx.reply(`❌ ${key}: ${(err as Error).message}`);
+    }
+  });
 
   bot.callbackQuery(/^pick:(.+)$/, async (ctx) => {
     const key = ctx.match[1];
@@ -413,6 +513,17 @@ export async function startBot(): Promise<void> {
       await ctx.answerCallbackQuery({ text: "Список уже неактуален — нажми /start заново.", show_alert: true });
       return;
     }
+    await proposeFromChat(ctx, key);
+  });
+
+  // Same propose flow as `pick:`, reached from a task card. Deliberately does NOT
+  // require/enable state.running: taking one task by hand must not switch on the
+  // auto-poll queue as a side effect.
+  bot.callbackQuery(/^take:(.+)$/, async (ctx) => {
+    await proposeFromChat(ctx, ctx.match[1]);
+  });
+
+  async function proposeFromChat(ctx: Context & { callbackQuery: NonNullable<Context["callbackQuery"]> }, key: string): Promise<void> {
     if (getLiveState().pendingApproval) {
       await ctx.answerCallbackQuery({ text: "Сначала подтверди или отмени предыдущее предложение.", show_alert: true });
       return;
@@ -471,7 +582,7 @@ export async function startBot(): Promise<void> {
         .editMessageText(ctx.chat!.id, msg.message_id, `❌ Ошибка: ${(err as Error).message}`)
         .catch(() => ctx.reply(`❌ Ошибка: ${(err as Error).message}`));
     }
-  });
+  }
 
   async function handleStop(ctx: Context): Promise<void> {
     state.running = false;
@@ -913,5 +1024,16 @@ export async function startBot(): Promise<void> {
   // dashboard showed "not running" while a real job was mid-flight). grammY's onStart
   // fires once getMe succeeds and polling has actually begun — the earliest point
   // "the bot is running" is true, not just "the process started".
+  // The ≡ menu next to the input field.
+  await bot.api
+    .setMyCommands([
+      { command: "start", description: "Меню и задачи для бота" },
+      { command: "tasks", description: "Все мои задачи, смена статуса" },
+      { command: "status", description: "Что сейчас происходит" },
+      { command: "budget", description: "Расход за сегодня" },
+      { command: "stop", description: "Остановить очередь" },
+      { command: "help", description: "Помощь" },
+    ])
+    .catch((err: Error) => console.warn(`[bot] setMyCommands failed: ${err.message}`));
   await bot.start({ onStart: () => setBotRunning(true) });
 }

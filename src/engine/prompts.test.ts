@@ -94,3 +94,14 @@ test("buildFeedbackPrompt caps each gate's output independently", () => {
   const lintSectionLength = prompt.split("### build")[0].length;
   assert.ok(lintSectionLength < 4200, `expected the lint section to be capped, got ${lintSectionLength} chars`);
 });
+
+test("every implement prompt forbids weakening checks and routes contradictions to a brief", async () => {
+  const { buildInitialPrompt, buildContinuationPrompt, buildFeedbackPrompt } = await import("./prompts.js");
+  const task = { id: "XEN-1", title: "t", description: "d", acceptanceCriteria: ["a"] };
+  for (const prompt of [buildInitialPrompt(task), buildContinuationPrompt(task, "diff")]) {
+    assert.match(prompt, /Never make a check pass by weakening it/);
+    assert.match(prompt, /STOP and raise a brief/);
+  }
+  assert.match(buildInitialPrompt(task, "", false), /STOP, make no further edits/);
+  assert.match(buildFeedbackPrompt([{ name: "test", command: "yarn test", passed: false, output: "x" }]), /Do not\s+weaken/);
+});

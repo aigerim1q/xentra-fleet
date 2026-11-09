@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { GateResult, TaskSpec } from "../types.js";
 import { buildBriefInstructions } from "./brief.js";
+import { buildTestIntegrityRule } from "./prompts.js";
 
 // Context handoff for the implement session.
 //
@@ -94,10 +95,14 @@ export function buildHandoffContinuationPrompt(
     "",
     gates ? `Gates still failing:\n\n${gates}` : "",
     "",
-    "Do not repeat approaches the note lists as failed. Verify the note against the code",
-    "before trusting it. Finish the implementation by editing files directly, following",
-    "the project's conventions. You have no shell; a separate process runs the gates and",
-    "commits. Stop once the files are correct.",
+    "Before any edit, check the note against the code and the failing gates above: the",
+    "note is a summary and can be stale or wrong. Where they disagree, trust the code and",
+    "the gates. Do not repeat approaches the note lists as failed. Then finish the",
+    "implementation by editing files directly, following the project's conventions. You",
+    "have no shell; a separate process runs the gates and commits. Stop once the files",
+    "are correct.",
+    "",
+    buildTestIntegrityRule(briefsEnabled),
     briefsEnabled ? `\n${buildBriefInstructions()}` : "",
   ]
     .filter((line) => line !== "")

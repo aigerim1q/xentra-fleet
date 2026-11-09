@@ -481,6 +481,9 @@ export async function runCloseLoop(task: TaskSpec, config: EngineConfig): Promis
   // Counted per runCloseLoop call: a resume after a brief starts a new count, which
   // is fine — the hard stop (maxContextTokens) still bounds any single session.
   let handoffsUsed = 0;
+  // Failure fingerprint at the last handoff: a second handoff on the exact same failure
+  // means the fresh session made no progress either — stuck, not a reason for a third.
+  let lastHandoffFingerprint: string | undefined;
 
   for (let i = startIteration; i < config.maxIterations; i++) {
     const remainingBudget = config.maxBudgetUsd - totalCostUsd;
@@ -560,6 +563,20 @@ export async function runCloseLoop(task: TaskSpec, config: EngineConfig): Promis
     if (shouldHandOff(contextTokens, handoffsUsed, config.handoff) && config.handoff) {
       const failedNow = verify.gates.filter((g) => !g.passed);
       const handoffNumber = handoffsUsed + 1;
+      const handoffFingerprint = fingerprintFailure(failedNow);
+      if (handoffFingerprint === lastHandoffFingerprint) {
+        config.onLog?.(`🛑 Handoff #${handoffNumber} отменён: после прошлой передачи та же ошибка — прогресса нет.`);
+        return {
+          task,
+          success: false,
+          iterations,
+          totalCostUsd,
+          stopReason: "stuck",
+          worktreeDir,
+          acceptanceTestPath,
+          stuckGates: failedNow.map((g) => g.name),
+        };
+      }
       config.onIteration?.({
         iteration: i + 1,
         phase: "iterating",
@@ -590,6 +607,7 @@ export async function runCloseLoop(task: TaskSpec, config: EngineConfig): Promis
         resumeSessionId = undefined;
         previousFingerprint = undefined;
         handoffsUsed = handoffNumber;
+        lastHandoffFingerprint = handoffFingerprint;
         continue;
       }
       config.onLog?.(`⚠️ Handoff #${handoffNumber} не удался — продолжаю по обычным правилам.`);

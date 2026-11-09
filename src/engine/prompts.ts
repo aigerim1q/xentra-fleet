@@ -5,6 +5,21 @@ import { buildBriefInstructions } from "./brief.js";
 // agent to discover on its own — it's not auto-loaded by the project's own CLAUDE.md
 // (only AGENTS.md is), so without this the agent would only see it if it happened to
 // read those files unprompted.
+// ImpossibleBench (Zhong, Raghunathan, Carlini): an explicit "stop if the tests are
+// flawed" instruction cut test-gaming from ~93% to ~1% on a model that otherwise made
+// contradictory tests pass by special-casing them. Included in every implement prompt,
+// with or without briefs.
+export function buildTestIntegrityRule(briefsEnabled = true): string {
+  return [
+    "Never make a check pass by weakening it: do not delete, skip or loosen tests, do not",
+    "special-case test inputs, do not change what a gate runs. If the acceptance criteria,",
+    "the acceptance test or existing tests contradict each other or the task,",
+    briefsEnabled
+      ? "STOP and raise a brief (format below) instead of forcing them to pass."
+      : "STOP, make no further edits and explain the contradiction in your reply.",
+  ].join("\n");
+}
+
 export function buildInitialPrompt(task: TaskSpec, memoryContext = "", briefsEnabled = true): string {
   const criteria = task.acceptanceCriteria.map((c, i) => `${i + 1}. ${c}`).join("\n");
   return [
@@ -19,6 +34,8 @@ export function buildInitialPrompt(task: TaskSpec, memoryContext = "", briefsEna
     "Follow the project's existing conventions. You do not have shell access in",
     "this session and should not attempt to run commands; a separate process",
     "will run tests and commit your changes. Stop once the files are correct.",
+    "",
+    buildTestIntegrityRule(briefsEnabled),
     briefsEnabled ? `\n${buildBriefInstructions()}` : "",
   ].join("\n");
 }
@@ -56,6 +73,8 @@ export function buildContinuationPrompt(task: TaskSpec, diff: string, briefsEnab
     "conventions. You do not have shell access in this session and should not attempt",
     "to run commands; a separate process will run tests and commit your changes. Stop",
     "once the files are correct.",
+    "",
+    buildTestIntegrityRule(briefsEnabled),
     briefsEnabled ? `\n${buildBriefInstructions()}` : "",
   ].join("\n");
 }
@@ -73,6 +92,8 @@ export function buildFeedbackPrompt(failedGates: GateResult[]): string {
     "",
     sections,
     "",
-    "Fix the root cause for each failing gate by editing files, then stop.",
+    "Fix the root cause for each failing gate by editing files, then stop. Do not",
+    "weaken, skip or delete a check to get it green — if a test itself is wrong or",
+    "contradicts the task, stop and say so instead.",
   ].join("\n");
 }
