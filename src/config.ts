@@ -163,6 +163,11 @@ export const config = {
   // possibly-stale local HEAD, so gates/acceptance tests run against what the MR will
   // actually be merged into, not whatever a human last happened to have checked out.
   freshBaseEnabled: (process.env.FRESH_BASE_ENABLED ?? "true") !== "false",
+  // Runs every `claude` turn with --restricted: no code-running tools, no WebFetch,
+  // user/project/local settings ignored, file tools confined to the worktree (so the
+  // node_modules symlink back into the main checkout can't be written through).
+  // Opt-out only if a live run shows it breaks a role.
+  agentRestrictedMode: (process.env.AGENT_RESTRICTED_MODE ?? "true") !== "false",
   maxIterations: Number(process.env.MAX_ITERATIONS ?? 5),
   maxBudgetUsd: Number(process.env.MAX_BUDGET_USD ?? 5),
   // A resumed session's answer quality degrades well before this many tokens would
@@ -175,6 +180,12 @@ export const config = {
   telegram: {
     botToken: process.env.TELEGRAM_BOT_TOKEN ?? "",
     allowedChatIds: (process.env.TELEGRAM_ALLOWED_CHAT_IDS ?? "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean),
+    // Optional second check on the sender, not just the chat: with a group in
+    // allowedChatIds, every member of that group could otherwise approve work.
+    allowedUserIds: (process.env.TELEGRAM_ALLOWED_USER_IDS ?? "")
       .split(",")
       .map((s) => s.trim())
       .filter(Boolean),

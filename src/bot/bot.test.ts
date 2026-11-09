@@ -62,3 +62,15 @@ test("formatProposal escapes reserved chars in the acceptance-criteria header li
   const text = formatProposal({ ...baseProposal, acceptanceCriteria: ["some criterion"] });
   assertReservedCharsEscaped(text);
 });
+
+test("sender check: chat allowlist always, user allowlist when configured", async () => {
+  const { isAuthorizedSender } = await import("./bot.js");
+  const chatOnly = { allowedChatIds: ["-100"], allowedUserIds: [] as string[] };
+  assert.ok(isAuthorizedSender("-100", "7", chatOnly));
+  assert.ok(!isAuthorizedSender("-200", "7", chatOnly));
+
+  const withUsers = { allowedChatIds: ["-100"], allowedUserIds: ["7"] };
+  assert.ok(isAuthorizedSender("-100", "7", withUsers));
+  assert.ok(!isAuthorizedSender("-100", "8", withUsers), "group member who is not the owner");
+  assert.ok(!isAuthorizedSender("-100", "", withUsers), "update without a sender");
+});

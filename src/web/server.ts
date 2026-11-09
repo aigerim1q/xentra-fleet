@@ -1,4 +1,5 @@
-import { createServer, type Server } from "node:http";
+import { createServer, type IncomingMessage, type Server } from "node:http";
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import { getLiveState } from "../bot/liveState.js";
 import { loadState, totalCostUsd, costSince, startOfTodayIso } from "../bot/state.js";
 import { listCandidates, proposeIssueByKey, type Proposal } from "../queue.js";
@@ -24,9 +25,31 @@ function sendJson(res: import("node:http").ServerResponse, status: number, body:
 // has no bot to announce through, so it omits the callback: a click there still
 // proposes (and anyone watching Jira sees the pendingApproval take effect on /status
 // once a bot is started), it just has nowhere to push a live notification.
+// The dashboard is local-only: bound to loopback, and a request is served only when
+// its Host is this loopback address (defeats DNS rebinding — a remote page that
+// resolves its own name to 127.0.0.1 still sends its own Host). The one
+// state-changing call additionally needs a per-process token that only the served
+// page carries, so another site open in the owner's browser can't trigger it.
+const LOOPBACK = "127.0.0.1";
+const dashboardToken = randomBytes(24).toString("hex");
+
+export function isAllowedHost(host: string | undefined, port: number): boolean {
+  return host === `${LOOPBACK}:${port}` || host === `localhost:${port}`;
+}
+
+export function hasValidToken(req: IncomingMessage, token: string = dashboardToken): boolean {
+  const given = req.headers["x-dashboard-token"];
+  if (typeof given !== "string" || given.length !== token.length) return false;
+  return timingSafeEqual(Buffer.from(given), Buffer.from(token));
+}
+
 export function startDashboardServer(port: number, onProposal?: (proposal: Proposal) => void): void {
   if (server) return;
   server = createServer((req, res) => {
+    if (!isAllowedHost(req.headers.host, port)) {
+      res.writeHead(403).end();
+      return;
+    }
     if (req.url === "/api/state") {
       const persisted = loadState();
       sendJson(res, 200, {
@@ -56,6 +79,10 @@ export function startDashboardServer(port: number, onProposal?: (proposal: Propo
 
     const startMatch = req.url?.match(/^\/api\/tickets\/([A-Za-z][A-Za-z0-9]*-\d+)\/start$/);
     if (startMatch && req.method === "POST") {
+      if (!hasValidToken(req)) {
+        sendJson(res, 403, { error: "missing or invalid dashboard token" });
+        return;
+      }
       const issueKey = startMatch[1];
       const live = getLiveState();
       if (live.currentJob || live.pendingApproval || live.pendingHumanReview || live.pendingBrief) {
@@ -72,11 +99,11 @@ export function startDashboardServer(port: number, onProposal?: (proposal: Propo
     }
 
     res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-    res.end(DASHBOARD_PAGE);
+    res.end(DASHBOARD_PAGE.replace("__DASHBOARD_TOKEN__", dashboardToken));
   });
-  server.listen(port);
+  server.listen(port, LOOPBACK);
 }
 
 export function dashboardUrl(port: number): string {
-  return `http://localhost:${port}/`;
+  return `http://${LOOPBACK}:${port}/`;
 }

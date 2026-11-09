@@ -31,6 +31,17 @@ import {
   type Candidate,
 } from "../queue.js";
 import { killCurrentTurn, runClaudeTurn } from "../engine/claudeEngine.js";
+
+/** Chat must be allowlisted; when TELEGRAM_ALLOWED_USER_IDS is set, the sender too. */
+export function isAuthorizedSender(
+  chatId: string,
+  userId: string,
+  allow: { allowedChatIds: string[]; allowedUserIds: string[] },
+): boolean {
+  if (!allow.allowedChatIds.includes(chatId)) return false;
+  if (allow.allowedUserIds.length > 0 && !allow.allowedUserIds.includes(userId)) return false;
+  return true;
+}
 import type { QueueRunOutcome, Brief } from "../types.js";
 
 const REPO_RU: Record<string, string> = { backend: "бэкенд", frontend: "фронтенд", cross: "кросс-репо (бэкенд → фронтенд)" };
@@ -345,8 +356,9 @@ export async function startBot(): Promise<void> {
 
   bot.use(async (ctx, next) => {
     const chatId = String(ctx.chat?.id ?? "");
-    if (!config.telegram.allowedChatIds.includes(chatId)) {
-      console.warn(`[bot] rejected message from unauthorized chat ${chatId}`);
+    const userId = ctx.from?.id != null ? String(ctx.from.id) : "";
+    if (!isAuthorizedSender(chatId, userId, config.telegram)) {
+      console.warn(`[bot] rejected update from chat ${chatId} user ${userId || "?"}`);
       return;
     }
     await next();

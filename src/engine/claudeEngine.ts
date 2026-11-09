@@ -1,8 +1,8 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { createInterface } from "node:readline";
 import type { ClaudeTurnResult } from "../types.js";
-import { buildDisallowedTools } from "./guardrails.js";
-import { SECRET_ENV_VARS, secretValues } from "../config.js";
+import { buildDisallowedTools, withAlwaysDisallowed } from "./guardrails.js";
+import { SECRET_ENV_VARS, config, secretValues } from "../config.js";
 import { scrubSecrets } from "./secretScrub.js";
 
 // Denylist, not allowlist: the `claude` CLI's own auth/config env surface (PATH, HOME,
@@ -84,8 +84,16 @@ export async function runClaudeTurn(opts: RunClaudeTurnOptions): Promise<ClaudeT
     "--permission-mode",
     opts.permissionMode,
     "--disallowedTools",
-    opts.disallowedToolsOverride ?? buildDisallowedTools(opts.extraDeniedPaths),
+    opts.disallowedToolsOverride
+      ? withAlwaysDisallowed(opts.disallowedToolsOverride)
+      : buildDisallowedTools(opts.extraDeniedPaths),
+    // The owner's own MCP servers (Telegram, Atlassian, ...) must not load into an
+    // unattended agent: an empty config plus --strict-mcp-config means no MCP at all.
+    "--strict-mcp-config",
+    "--mcp-config",
+    '{"mcpServers":{}}',
   ];
+  if (config.agentRestrictedMode) args.push("--restricted");
   if (opts.resumeSessionId) args.push("--resume", opts.resumeSessionId);
   if (opts.maxBudgetUsd) args.push("--max-budget-usd", String(opts.maxBudgetUsd));
   if (opts.model) args.push("--model", opts.model);

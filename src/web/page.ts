@@ -2,6 +2,7 @@ export const DASHBOARD_PAGE = `<!doctype html>
 <html lang="ru">
 <head>
 <meta charset="utf-8">
+<meta name="dashboard-token" content="__DASHBOARD_TOKEN__">
 <title>Харнесс Jira</title>
 <style>
   body { font-family: -apple-system, system-ui, sans-serif; background: #0f1115; color: #e6e6e6; margin: 0; padding: 24px; }
@@ -191,7 +192,10 @@ async function startTicket(key, btn) {
   btn.disabled = true;
   btn.textContent = "анализирую…";
   try {
-    const res = await fetch("/api/tickets/" + key + "/start", { method: "POST" });
+    const res = await fetch("/api/tickets/" + key + "/start", {
+      method: "POST",
+      headers: { "X-Dashboard-Token": document.querySelector('meta[name="dashboard-token"]').content },
+    });
     if (!res.ok) {
       const body = await res.json().catch(function () { return {}; });
       alert("Не удалось предложить " + key + ": " + (body.error || res.status));

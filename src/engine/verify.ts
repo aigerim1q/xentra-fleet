@@ -1,16 +1,29 @@
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import type { GateBaseline, GateResult, GateSpec, VerifyResult } from "../types.js";
+import { buildAgentEnv } from "./claudeEngine.js";
+import { secretValues } from "../config.js";
+import { scrubSecrets } from "./secretScrub.js";
 
 const execAsync = promisify(exec);
 
+// Gates run code the agent wrote (tests, acceptance tests, whatever `yarn test`
+// picks up), so they get the same token-free env as the agent itself — otherwise a
+// test could read JIRA_PAT/GITLAB_TOKEN/TELEGRAM_BOT_TOKEN from process.env and
+// send them out, bypassing buildAgentEnv entirely. Output is scrubbed too: it goes
+// back into the agent's prompt and, on needs-human, to Telegram.
 async function runRaw(cwd: string, command: string): Promise<{ exitedZero: boolean; output: string }> {
+  const scrub = (text: string) => scrubSecrets(text, secretValues());
   try {
-    const { stdout, stderr } = await execAsync(command, { cwd, maxBuffer: 1024 * 1024 * 20 });
-    return { exitedZero: true, output: stdout + stderr };
+    const { stdout, stderr } = await execAsync(command, {
+      cwd,
+      env: buildAgentEnv(),
+      maxBuffer: 1024 * 1024 * 20,
+    });
+    return { exitedZero: true, output: scrub(stdout + stderr) };
   } catch (err: unknown) {
     const e = err as { stdout?: string; stderr?: string; message: string };
-    return { exitedZero: false, output: (e.stdout ?? "") + (e.stderr ?? "") || e.message };
+    return { exitedZero: false, output: scrub((e.stdout ?? "") + (e.stderr ?? "") || e.message) };
   }
 }
 
