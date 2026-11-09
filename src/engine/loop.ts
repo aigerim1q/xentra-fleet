@@ -24,6 +24,7 @@ import { writeAcceptanceTest } from "./acceptanceTest.js";
 import { readMemoryFiles, buildMemoryContextBlock, updateProjectMemory } from "./memory.js";
 import { fingerprintFailure } from "./stuckDetector.js";
 import { reviewChanges, buildReviewFixPrompt, formatReviewRound } from "./review.js";
+import { mergeReviewOutcomes, reviewWithCodex } from "./codexReview.js";
 import { generateTestingNotes } from "./testingNotes.js";
 import { generateCloseReport } from "./closeReport.js";
 import { checkGateIntegrity } from "./gateIntegrity.js";
@@ -165,7 +166,15 @@ async function runPostImplementSuccess(
           costUsd: totalCostUsd,
           summary: `Ревьюю изменения (раунд ${round}/${config.review.maxRounds})`,
         });
-        const reviewResult = await reviewChanges(worktreeDir, task, config.review);
+        const { codex, ...claudeReview } = config.review;
+        const reviewResult = codex
+          ? mergeReviewOutcomes(
+              ...(await Promise.all([
+                reviewChanges(worktreeDir, task, claudeReview),
+                reviewWithCodex(worktreeDir, task, { ...codex, baseBranch: claudeReview.baseBranch }),
+              ])),
+            )
+          : await reviewChanges(worktreeDir, task, claudeReview);
         totalCostUsd += reviewResult.costUsd;
         reviewFindings = reviewResult.findings;
         if (reviewResult.reason) config.onLog?.(`⚠️ Не удалось провести ревью (${reviewResult.reason})`);

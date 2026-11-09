@@ -139,6 +139,17 @@ export const config = {
   // need a hard stop the same way MAX_ITERATIONS is one for the gate-fixing loop —
   // otherwise a pair that never agrees just burns the whole task budget arguing.
   maxReviewRounds: Number(process.env.MAX_REVIEW_ROUNDS ?? 3),
+  // Second reviewer on another provider (Codex CLI, ChatGPT login). On when
+  // CODEX_REVIEW_MODEL is set and CODEX_REVIEW_ENABLED isn't "false"; runs alongside
+  // the Claude reviewer, and a blocking finding from either one blocks.
+  codexReview:
+    (process.env.CODEX_REVIEW_ENABLED ?? "true") !== "false" && process.env.CODEX_REVIEW_MODEL
+      ? {
+          model: process.env.CODEX_REVIEW_MODEL,
+          effort: process.env.CODEX_REVIEW_EFFORT ?? "high",
+          timeoutMs: Number(process.env.CODEX_REVIEW_TIMEOUT_MS ?? 20 * 60 * 1000),
+        }
+      : undefined,
   // Same shape, same default. Costs nothing extra (a brief is a different shape of the
   // SAME implement turn's response, not a separate turn) — the toggle exists for
   // debugging/rollback, same reasoning as gateIntegrityCheckEnabled.

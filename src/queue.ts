@@ -552,7 +552,12 @@ async function closeLoopAndPush(
       : undefined,
     memory: config.memoryEnabled ? { model: config.models.memory, baseBranch: config.gitlab.targetBranch } : undefined,
     review: config.reviewEnabled
-      ? { model: config.models.review, baseBranch: config.gitlab.targetBranch, maxRounds: config.maxReviewRounds }
+      ? {
+          model: config.models.review,
+          baseBranch: config.gitlab.targetBranch,
+          maxRounds: config.maxReviewRounds,
+          codex: config.codexReview,
+        }
       : undefined,
     testingNotes: config.testingNotesEnabled
       ? { model: config.models.testing, baseBranch: config.gitlab.targetBranch }

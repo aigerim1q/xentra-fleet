@@ -41,6 +41,7 @@ import {
   type Candidate,
 } from "../queue.js";
 import { killCurrentTurn, runClaudeTurn } from "../engine/claudeEngine.js";
+import { killCodexReview } from "../engine/codexReview.js";
 
 /** Chat must be allowlisted; when TELEGRAM_ALLOWED_USER_IDS is set, the sender too. */
 export function isAuthorizedSender(
@@ -596,7 +597,9 @@ export async function startBot(): Promise<void> {
     state.running = false;
     saveState(state);
     clearPoll();
-    const killed = killCurrentTurn();
+    // Both reviewers can be running at once; kill both, report if either was live.
+    const killedCodex = killCodexReview();
+    const killed = killCurrentTurn() || killedCodex;
     await ctx.reply(killed ? "⛔ Прервал текущий ход. Поиск новых тикетов тоже останавливаю." : "🤷 Сейчас ничего не делаю. Останавливаю поиск новых тикетов.");
   }
   bot.command("kill", handleKill);

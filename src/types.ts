@@ -175,7 +175,14 @@ export interface EngineConfig {
   // issue -> dev fixes it -> gates re-run -> review again) — required, not optional:
   // an uncapped negotiation between two agents that might never agree has to have a
   // hard stop, same reasoning as maxIterations for the gate-fixing loop.
-  review?: { model: string; baseBranch: string; maxRounds: number };
+  // `codex` adds a second, independent reviewer on another provider (codexReview.ts);
+  // absent means the Claude reviewer alone. Any blocking finding from either blocks.
+  review?: {
+    model: string;
+    baseBranch: string;
+    maxRounds: number;
+    codex?: { model: string; effort: string; timeoutMs: number };
+  };
   // Absent disables the manual-testing-notes turn — same opt-out shape as
   // acceptanceTest/memory/review. Never blocks anything (unlike review): it's purely
   // informational output for a human tester, surfaced in the Jira success comment.

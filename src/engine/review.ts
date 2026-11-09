@@ -13,7 +13,9 @@ export interface ReviewOutcome {
 // the category of problem automated checks structurally can't: architectural
 // decisions, security issues a passing test doesn't exercise, edge cases nobody wrote
 // a test for, convention violations.
-export function buildReviewPrompt(task: TaskSpec, diffText: string): string {
+// Shared by both reviewers (Claude here, Codex in codexReview.ts) so they judge the
+// exact same task, criteria and diff — only the answer format differs.
+export function buildReviewBrief(task: TaskSpec, diffText: string): string[] {
   const criteria =
     task.acceptanceCriteria.length > 0
       ? task.acceptanceCriteria.map((c, i) => `${i + 1}. ${c}`).join("\n")
@@ -36,6 +38,12 @@ export function buildReviewPrompt(task: TaskSpec, diffText: string): string {
     "конвенций проекта, нечитаемый или рискованный код. НЕ повторяй то, что уже",
     "гарантировано прошедшими тестами/типами/сборкой, и не придирайся к стилю,",
     "если он соответствует остальному проекту.",
+  ];
+}
+
+export function buildReviewPrompt(task: TaskSpec, diffText: string): string {
+  return [
+    ...buildReviewBrief(task, diffText),
     "",
     "Ответь СТРОГО в этом формате, на русском:",
     "",
