@@ -133,6 +133,10 @@ export interface EngineConfig {
   // turn (the real total the model saw, not a per-turn delta). Absent/zero disables
   // the check entirely.
   maxContextTokens?: number;
+  // Absent disables automatic handoff: the loop then only has the hard stop above.
+  // Present: at thresholdTokens the implement session writes a handoff note and a
+  // fresh session continues from it (engine/handoff.ts), at most maxHandoffs times.
+  handoff?: { thresholdTokens: number; maxHandoffs: number; baseBranch: string };
   permissionMode: string;
   model?: string;
   extraDeniedPaths?: string[];

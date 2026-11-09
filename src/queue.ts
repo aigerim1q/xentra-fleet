@@ -542,6 +542,9 @@ async function closeLoopAndPush(
     maxIterations: config.maxIterations,
     maxBudgetUsd: config.maxBudgetUsd,
     maxContextTokens: config.maxContextTokens,
+    handoff: config.handoffEnabled
+      ? { thresholdTokens: config.handoffContextTokens, maxHandoffs: config.maxHandoffs, baseBranch: config.gitlab.targetBranch }
+      : undefined,
     permissionMode: "acceptEdits",
     model: config.models.implement,
     acceptanceTest: config.acceptanceTestsEnabled

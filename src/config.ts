@@ -175,6 +175,12 @@ export const config = {
   // ceiling. 150k matches Avengers Harness's own starting value for the same check
   // (same reasoning: min(40% of window, 150k), picked conservative over precise).
   maxContextTokens: Number(process.env.CONTEXT_BUDGET_TOKENS ?? 150_000),
+  // Automatic handoff below the hard stop (engine/handoff.ts): ~40% of a 200k window,
+  // the point Avengers Harness uses, at most twice per task before the hard stop
+  // above takes over.
+  handoffEnabled: (process.env.HANDOFF_ENABLED ?? "true") !== "false",
+  handoffContextTokens: Number(process.env.HANDOFF_CONTEXT_TOKENS ?? 80_000),
+  maxHandoffs: Number(process.env.MAX_HANDOFFS ?? 2),
   dailyBudgetUsd: Number(process.env.DAILY_BUDGET_USD ?? 20),
   maxTasksPerDay: Number(process.env.MAX_TASKS_PER_DAY ?? 10),
   telegram: {

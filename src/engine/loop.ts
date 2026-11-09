@@ -10,6 +10,14 @@ import type {
 } from "../types.js";
 import { runClaudeTurn } from "./claudeEngine.js";
 import { establishBaselines, runGates } from "./verify.js";
+import {
+  buildHandoffContinuationPrompt,
+  buildHandoffRequestPrompt,
+  parseHandoffNote,
+  saveHandoffNote,
+  shouldHandOff,
+} from "./handoff.js";
+import { getWorktreeDiff } from "./git.js";
 import { buildFeedbackPrompt, buildInitialPrompt } from "./prompts.js";
 import { createWorktree, commitAll, fetchFreshBase, rebaseOntoFreshBase } from "./git.js";
 import { writeAcceptanceTest } from "./acceptanceTest.js";
@@ -470,6 +478,9 @@ export async function runCloseLoop(task: TaskSpec, config: EngineConfig): Promis
   }
 
   const iterations: CloseLoopIteration[] = [];
+  // Counted per runCloseLoop call: a resume after a brief starts a new count, which
+  // is fine — the hard stop (maxContextTokens) still bounds any single session.
+  let handoffsUsed = 0;
 
   for (let i = startIteration; i < config.maxIterations; i++) {
     const remainingBudget = config.maxBudgetUsd - totalCostUsd;
@@ -546,6 +557,43 @@ export async function runCloseLoop(task: TaskSpec, config: EngineConfig): Promis
     // tradeoff (that session won't know what this one already tried), which is exactly
     // why it's never automatic.
     const contextTokens = totalContextTokens(turn.usage);
+    if (shouldHandOff(contextTokens, handoffsUsed, config.handoff) && config.handoff) {
+      const failedNow = verify.gates.filter((g) => !g.passed);
+      const handoffNumber = handoffsUsed + 1;
+      config.onIteration?.({
+        iteration: i + 1,
+        phase: "iterating",
+        costUsd: totalCostUsd,
+        summary: `Контекст ${Math.round(contextTokens / 1000)}k — передаю дела новой сессии (handoff #${handoffNumber})`,
+      });
+      const remaining = config.maxBudgetUsd - totalCostUsd;
+      const handoffTurn = await runClaudeTurn({
+        cwd: worktreeDir,
+        prompt: buildHandoffRequestPrompt(failedNow),
+        permissionMode: config.permissionMode,
+        resumeSessionId,
+        maxBudgetUsd: remaining > 0 ? remaining : undefined,
+        // Read-only: the note is text, the code stays as the gates last saw it.
+        disallowedToolsOverride: "Bash,Edit,Write,MultiEdit",
+        model: config.model,
+        onLog: config.onLog,
+      });
+      totalCostUsd += handoffTurn.totalCostUsd;
+      if (!handoffTurn.isError) {
+        const note = parseHandoffNote(handoffTurn.resultText);
+        await saveHandoffNote(task.id, handoffNumber, note);
+        const diff = await getWorktreeDiff(worktreeDir, config.handoff.baseBranch).catch(() => "");
+        prompt = buildHandoffContinuationPrompt(task, note, diff, failedNow, handoffNumber, config.briefsEnabled !== false);
+        config.onLog?.(`🔁 Handoff #${handoffNumber}: контекст ${Math.round(contextTokens / 1000)}k, продолжает новая сессия.`);
+        // A fresh session: no --resume, and the stuck detector restarts with it
+        // (its premise is the SAME session failing identically twice).
+        resumeSessionId = undefined;
+        previousFingerprint = undefined;
+        handoffsUsed = handoffNumber;
+        continue;
+      }
+      config.onLog?.(`⚠️ Handoff #${handoffNumber} не удался — продолжаю по обычным правилам.`);
+    }
     if (config.maxContextTokens && contextTokens >= config.maxContextTokens) {
       return {
         task,
