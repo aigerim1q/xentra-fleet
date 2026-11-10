@@ -7,6 +7,7 @@ import { OWNER_ADDRESS, loadRoles } from "./roles.js";
 import { FLEET_ADDRESS } from "./supervisor.js";
 import { fleetHome } from "./workspace.js";
 import { FleetLimits } from "./limits.js";
+import { WATCHER_ADDRESSES } from "./watchers.js";
 import { approvePush, declinePush, loadPush, type PushDeps } from "./pushRequests.js";
 import { createMergeRequest, pushBranch } from "../gitlab.js";
 import { config } from "../config.js";
@@ -88,13 +89,14 @@ export function formatForTelegram(l: Letter): string {
 // Who gets the owner's reply: the letter's sender, except a supervisor notice — the
 // supervisor doesn't read mail, so the reply goes to pm, who runs the thread.
 export function replyTarget(from: string): string {
-  return from === FLEET_ADDRESS ? "xentra/pm" : from;
+  return from === FLEET_ADDRESS || WATCHER_ADDRESSES.includes(from) ? "xentra/pm" : from;
 }
 
 function spoolWithMailboxes(): Spool {
   const spool = new Spool();
   spool.register(OWNER_ADDRESS);
   spool.register(FLEET_ADDRESS);
+  for (const w of WATCHER_ADDRESSES) spool.register(w);
   for (const r of loadRoles()) spool.register(r.mail);
   return spool;
 }

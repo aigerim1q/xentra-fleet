@@ -67,8 +67,11 @@ export function resumableSession(st: ThreadState | undefined, role: Role, cwd: s
   return st.cwd === cwd && st.model === role.model && /^[0-9a-f-]{36}$/i.test(st.sessionId) ? st.sessionId : undefined;
 }
 
+const NOTIFIERS = ["xentra/fleet", "xentra/ci-watch", "xentra/jira-watch"];
+
 function formatLetter(l: Letter): string {
-  return [`### Письмо ${l.id}`, `от ${l.from}, «${l.subject}», ${l.date}, приоритет ${l.priority}`, "", l.body].join("\n");
+  const note = NOTIFIERS.includes(l.from) ? " — уведомитель: ответ ему не нужен, закрой квитанцией <ack>" : "";
+  return [`### Письмо ${l.id}`, `от ${l.from}${note}, «${l.subject}», ${l.date}, приоритет ${l.priority}`, "", l.body].join("\n");
 }
 
 export function buildSessionPrompt(input: SessionInput, resumed: boolean): string {

@@ -5,6 +5,7 @@ import type { Priority } from "./mail.js";
 //   <ack id=".." [note=".."]/>
 //   <gates/>
 //   <memory scope="thread|task" [key=".."]>text</memory>
+//   <watch-ci/>          (letter from ci-watch when the thread MR's pipeline finishes)
 //   <push title=".."/>   (roles with canRequestPush — asks the owner to push + open an MR)
 // Parsed leniently (attribute order, quotes ' or ") and validated later, by the
 // supervisor, against the spool — a bad address fails that one block, not the session.
@@ -31,6 +32,7 @@ export interface ReplyActions {
   gates: boolean;
   memory: MemoryAction[];
   push?: { title: string };
+  watchCi: boolean;
 }
 
 const ATTR = /([a-z-]+)\s*=\s*("([^"]*)"|'([^']*)')/gi;
@@ -75,5 +77,5 @@ export function parseReplyActions(text: string): ReplyActions {
   }
   const pushTag = /<push\b([^>]*?)\/?>/i.exec(text);
   const pushTitle = pushTag ? attrs(pushTag[1]).title : undefined;
-  return { mails, acks, gates: /<gates\s*\/?>/i.test(text), memory, ...(pushTitle ? { push: { title: pushTitle } } : {}) };
+  return { mails, acks, gates: /<gates\s*\/?>/i.test(text), memory, watchCi: /<watch-ci\s*\/?>/i.test(text), ...(pushTitle ? { push: { title: pushTitle } } : {}) };
 }

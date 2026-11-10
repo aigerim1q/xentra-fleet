@@ -7,6 +7,10 @@ import { OWNER_ADDRESS, loadRoles } from "./roles.js";
 import { runRoleSession } from "./session.js";
 import { FLEET_ADDRESS, Supervisor } from "./supervisor.js";
 import { FleetLimits } from "./limits.js";
+import { pollCi, pollJira, type WatcherDeps } from "./watchers.js";
+import { JiraClient } from "../jira/client.js";
+import { getFailedJobs, getMergeRequestPipeline } from "../gitlab.js";
+import { secretValues } from "../config.js";
 import { commitWorkspace, ensureWorkspace, fleetHome, runWorkspaceGates, workspaceDiff, type RepoTarget } from "./workspace.js";
 
 // `fleet …` commands: the supervisor (`run`, `once`), the owner's mailbox from the
@@ -31,6 +35,44 @@ async function buildSupervisor(log: (l: string) => void, opts: { limits: boolean
   });
 }
 
+function realWatcherDeps(log: (l: string) => void): WatcherDeps {
+  const jira = new JiraClient(config.jira.baseUrl, config.jira.token);
+  const gl = { gitlabBaseUrl: config.gitlab.baseUrl, token: config.gitlab.token };
+  return {
+    pipeline: (projectPath, iid) => getMergeRequestPipeline({ ...gl, projectPath, iid }),
+    failedJobs: (projectPath, pipelineId) => getFailedJobs({ ...gl, projectPath, pipelineId }),
+    jiraCard: (key) => jira.getIssueCard(key),
+    jiraComments: (key) => jira.getRecentComments(key, 5),
+    knownSecrets: secretValues(),
+    log: (l) => log(`[fleet] ${l}`),
+  };
+}
+
+// ci-watch every 2 min, jira-watch every 5 min (FLEET_CI_POLL_MS / FLEET_JIRA_POLL_MS).
+function startWatchers(log: (l: string) => void): () => void {
+  const spool = new Spool();
+  const stateDir = join(fleetHome(), "state");
+  const deps = realWatcherDeps(log);
+  let ciBusy = false;
+  let jiraBusy = false;
+  const ci = setInterval(async () => {
+    if (ciBusy) return;
+    ciBusy = true;
+    await pollCi(spool, stateDir, deps).catch((e) => log(`[fleet] ci-watch: ${(e as Error).message}`));
+    ciBusy = false;
+  }, Number(process.env.FLEET_CI_POLL_MS ?? 120_000));
+  const jira = setInterval(async () => {
+    if (jiraBusy) return;
+    jiraBusy = true;
+    await pollJira(spool, stateDir, deps).catch((e) => log(`[fleet] jira-watch: ${(e as Error).message}`));
+    jiraBusy = false;
+  }, Number(process.env.FLEET_JIRA_POLL_MS ?? 300_000));
+  return () => {
+    clearInterval(ci);
+    clearInterval(jira);
+  };
+}
+
 function printLetter(l: { id: string; from: string; to: string[]; subject: string; date: string; thread: string; priority: string; body: string }): void {
   console.log(`--- ${l.id}\nfrom: ${l.from}  to: ${l.to.join(",")}  ${l.date}  [${l.priority}]\nthread: ${l.thread}\nsubject: ${l.subject}\n\n${l.body}\n`);
 }
@@ -44,9 +86,11 @@ export function registerFleetCommands(program: Command): void {
     .action(async () => {
       const sup = await buildSupervisor((l) => console.log(l));
       sup.start();
+      const stopWatchers = startWatchers((l) => console.log(l));
       console.log(`[fleet] supervisor started, spool ${new Spool().root}`);
       const shutdown = async () => {
         console.log("[fleet] stopping — waiting for running sessions");
+        stopWatchers();
         await sup.stop();
         process.exit(0);
       };

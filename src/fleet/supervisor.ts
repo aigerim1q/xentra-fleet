@@ -8,7 +8,8 @@ import type { SessionRunner } from "./session.js";
 import type { FleetLimits } from "./limits.js";
 import { appendMemory, memoryPromptBlock } from "./memory.js";
 import { branchFor } from "./workspace.js";
-import { fileRequest } from "./pushRequests.js";
+import { fileRequest, loadPush } from "./pushRequests.js";
+import { WATCHER_ADDRESSES, addCiWatch } from "./watchers.js";
 import type { RepoTarget } from "./workspace.js";
 
 // One supervisor process for the whole fleet (the CTO fleet runs one runner per role
@@ -56,6 +57,7 @@ export class Supervisor {
   constructor(private readonly o: SupervisorOptions) {
     o.spool.register(FLEET_ADDRESS);
     o.spool.register(OWNER_ADDRESS);
+    for (const w of WATCHER_ADDRESSES) o.spool.register(w);
     for (const r of o.roles) o.spool.register(r.mail);
   }
 
@@ -181,6 +183,11 @@ export class Supervisor {
     const answered = new Set<string>();
     const problems: string[] = [];
     for (const m of outcome.actions.mails) {
+      const oneWay = m.to.filter((a) => WATCHER_ADDRESSES.includes(a) || a === FLEET_ADDRESS);
+      if (oneWay.length > 0) {
+        problems.push(`${oneWay.join(", ")} — уведомители, писем не читают; ставь им <ack>, а вопросы — pm или владельцу`);
+        continue;
+      }
       try {
         send(spool, {
           from: role.mail,
@@ -239,6 +246,16 @@ export class Supervisor {
         thread: batch.thread,
         repo: batch.repo,
       });
+    }
+
+    if (outcome.actions.watchCi) {
+      const pushed = loadPush(this.o.stateDir, batch.thread);
+      if (!pushed?.mr || !repo.gitlabProjectPath) {
+        problems.push("наблюдать нечего: у треда ещё нет MR (сначала <push/> и одобрение владельца)");
+      } else {
+        addCiWatch(this.o.stateDir, { thread: batch.thread, requestedBy: role.mail, projectPath: repo.gitlabProjectPath, mrIid: pushed.mr.iid, repo: batch.repo });
+        this.log(`${role.role}: watching CI of MR !${pushed.mr.iid} for thread ${batch.thread}`);
+      }
     }
 
     if (outcome.actions.push) {

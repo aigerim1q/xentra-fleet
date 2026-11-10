@@ -86,3 +86,68 @@ export async function findMergeRequestForIssue(opts: {
     pipelineUrl: full.head_pipeline?.web_url,
   };
 }
+
+export interface PipelineState {
+  status?: string; // head pipeline status, undefined when there is none yet
+  sha?: string;
+  pipelineId?: number;
+  webUrl?: string;
+  mrState: string;
+}
+
+async function gitlabGet(baseUrl: string, token: string, path: string, signal?: AbortSignal): Promise<Response> {
+  const res = await fetch(`${baseUrl}/api/v4${path}`, { headers: { "PRIVATE-TOKEN": token }, signal });
+  if (!res.ok) throw new Error(`GitLab ${res.status}`);
+  return res;
+}
+
+export async function getMergeRequestPipeline(opts: { gitlabBaseUrl: string; token: string; projectPath: string; iid: number }): Promise<PipelineState> {
+  const p = encodeURIComponent(opts.projectPath);
+  const mr = (await (await gitlabGet(opts.gitlabBaseUrl, opts.token, `/projects/${p}/merge_requests/${opts.iid}`)).json()) as {
+    state: string;
+    head_pipeline?: { id: number; status: string; sha: string; web_url: string } | null;
+  };
+  return {
+    mrState: mr.state,
+    status: mr.head_pipeline?.status,
+    sha: mr.head_pipeline?.sha,
+    pipelineId: mr.head_pipeline?.id,
+    webUrl: mr.head_pipeline?.web_url,
+  };
+}
+
+// Failed jobs of a pipeline with the tail of each log — what a developer needs first.
+export async function getFailedJobs(opts: {
+  gitlabBaseUrl: string;
+  token: string;
+  projectPath: string;
+  pipelineId: number;
+  tailChars?: number;
+}): Promise<Array<{ name: string; stage: string; webUrl: string; logTail: string }>> {
+  const p = encodeURIComponent(opts.projectPath);
+  const jobs = (await (
+    await gitlabGet(opts.gitlabBaseUrl, opts.token, `/projects/${p}/pipelines/${opts.pipelineId}/jobs?scope[]=failed&per_page=10`)
+  ).json()) as Array<{ id: number; name: string; stage: string; web_url: string }>;
+  const out = [];
+  for (const j of jobs.slice(0, 5)) {
+    const trace = await gitlabGet(opts.gitlabBaseUrl, opts.token, `/projects/${p}/jobs/${j.id}/trace`)
+      .then((r) => r.text())
+      .catch(() => "");
+    out.push({ name: j.name, stage: j.stage, webUrl: j.web_url, logTail: cleanJobTrace(trace).slice(-(opts.tailChars ?? 3000)) });
+  }
+  return out;
+}
+
+// GitLab traces carry ANSI colours, section markers and (on timestamped runners) a
+// "2026-11-05T15:12:33.520008Z 00O " prefix per line; the last lines are the runner's
+// own cleanup. Strip all that so the tail shows the actual failure.
+export function cleanJobTrace(trace: string): string {
+  let t = trace
+    .replace(/\x1b\[[0-9;]*[A-Za-z]/g, "")
+    .replace(/section_(start|end):\d+:[^\r\n]*\r?/g, "")
+    .replace(/^\d{4}-\d{2}-\d{2}T[\d:.]+Z \d{2}[OE]\+?\s?/gm, "")
+    .replace(/\r/g, "");
+  const cleanup = t.search(/^(Cleaning up project directory|Running after_script|Uploading artifacts)/m);
+  if (cleanup > 0) t = t.slice(0, cleanup);
+  return t.replace(/\n{3,}/g, "\n\n").trimEnd();
+}
