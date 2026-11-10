@@ -2,8 +2,9 @@ import { existsSync, mkdirSync, readFileSync, rmSync, watch, writeFileSync, type
 import { join } from "node:path";
 import { pickBatch, type Batch } from "./gate.js";
 import { isHeld, placeHold, quarantine, recentRoleLetters, shouldHold } from "./loopGuard.js";
-import { ack, archive, readInbox, send, thread as threadLetters, type Letter, type Spool } from "./mail.js";
-import { OWNER_ADDRESS, senderAllowed, type Role } from "./roles.js";
+import { ack, archive, moveToInbox, readInbox, send, sentBy, thread as threadLetters, type Letter, type Spool } from "./mail.js";
+import { OWNER_ADDRESS, poolAddresses, senderAllowed, type Role } from "./roles.js";
+import { readThreadState } from "./session.js";
 import type { SessionRunner } from "./session.js";
 import type { FleetLimits } from "./limits.js";
 import { appendMemory, memoryPromptBlock } from "./memory.js";
@@ -61,6 +62,28 @@ export class Supervisor {
     o.spool.register(OWNER_ADDRESS);
     for (const w of WATCHER_ADDRESSES) o.spool.register(w);
     for (const r of o.roles) o.spool.register(r.mail);
+    for (const pool of poolAddresses(o.roles).keys()) o.spool.register(pool);
+  }
+
+  // Pool letters (e.g. xentra/dev) go to one member: the member who already worked on the
+  // thread (it has the session context), else the least loaded member that may start now.
+  routePools(): void {
+    const { spool, stateDir } = this.o;
+    for (const [pool, members] of poolAddresses(this.o.roles)) {
+      for (const l of readInbox(spool, pool)) {
+        if (l.kind) {
+          archive(spool, pool, l.id);
+          continue;
+        }
+        const knows = (r: Role) =>
+          !!readThreadState(stateDir, r.role, l.thread) || sentBy(spool, r.mail).some((x) => x.thread === l.thread);
+        const load = (r: Role) => readInbox(spool, r.mail).filter((x) => !x.kind).length + (this.busyRoles.has(r.role) ? 1 : 0);
+        const open = members.filter((r) => !this.o.limits?.blockReason(r));
+        const candidates = open.length > 0 ? open : members;
+        const chosen = candidates.find(knows) ?? [...candidates].sort((a, b) => load(a) - load(b) || a.role.localeCompare(b.role))[0];
+        if (moveToInbox(spool, pool, chosen.mail, l.id)) this.log(`${pool}: ${l.id} → ${chosen.role}`);
+      }
+    }
   }
 
   private log(line: string): void {
@@ -71,9 +94,9 @@ export class Supervisor {
     const kick = () => {
       if (!this.stopped) this.tick();
     };
-    for (const r of this.o.roles) {
+    for (const addr of [...this.o.roles.map((r) => r.mail), ...poolAddresses(this.o.roles).keys()]) {
       try {
-        this.watchers.push(watch(this.o.spool.dir("Inbox", r.mail), kick));
+        this.watchers.push(watch(this.o.spool.dir("Inbox", addr), kick));
       } catch {
         /* polling still covers it */
       }
@@ -102,6 +125,7 @@ export class Supervisor {
   // promises so tests (and `fleet once`) can wait for them.
   tick(): Promise<void>[] {
     const started: Promise<void>[] = [];
+    this.routePools();
     for (const role of this.o.roles) {
       if (this.busyRoles.has(role.role)) continue;
       const batch = this.prepare(role);

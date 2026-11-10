@@ -3,7 +3,7 @@ import type { Command } from "commander";
 import { config } from "../config.js";
 import { listHolds, releaseHold } from "./loopGuard.js";
 import { Spool, archive, readInbox, send, thread, type Priority } from "./mail.js";
-import { OWNER_ADDRESS, loadRoles } from "./roles.js";
+import { OWNER_ADDRESS, loadRoles, poolAddresses } from "./roles.js";
 import { runRoleSession } from "./session.js";
 import { FLEET_ADDRESS, Supervisor } from "./supervisor.js";
 import { FleetLimits } from "./limits.js";
@@ -141,7 +141,9 @@ export function registerFleetCommands(program: Command): void {
     .action((o) => {
       const spool = new Spool();
       spool.register(OWNER_ADDRESS);
-      for (const r of loadRoles()) spool.register(r.mail);
+      const roles = loadRoles();
+      for (const r of roles) spool.register(r.mail);
+      for (const pool of poolAddresses(roles).keys()) spool.register(pool);
       const l = send(spool, {
         from: OWNER_ADDRESS,
         to: String(o.to).split(",").map((s: string) => s.trim()),

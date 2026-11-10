@@ -3,7 +3,7 @@ import { dirname, join } from "node:path";
 import { InlineKeyboard, type Bot, type Context } from "grammy";
 import { listHolds, releaseHold } from "./loopGuard.js";
 import { Spool, archive, findInInbox, readInbox, send, type Letter } from "./mail.js";
-import { OWNER_ADDRESS, loadRoles } from "./roles.js";
+import { OWNER_ADDRESS, loadRoles, poolAddresses } from "./roles.js";
 import { FLEET_ADDRESS } from "./supervisor.js";
 import { fleetHome } from "./workspace.js";
 import { FleetLimits } from "./limits.js";
@@ -98,7 +98,9 @@ function spoolWithMailboxes(): Spool {
   spool.register(OWNER_ADDRESS);
   spool.register(FLEET_ADDRESS);
   for (const w of WATCHER_ADDRESSES) spool.register(w);
-  for (const r of loadRoles()) spool.register(r.mail);
+  const roles = loadRoles();
+  for (const r of roles) spool.register(r.mail);
+  for (const pool of poolAddresses(roles).keys()) spool.register(pool);
   return spool;
 }
 

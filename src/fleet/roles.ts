@@ -25,6 +25,8 @@ export interface Role {
   canRequestPush: boolean;
   // Its БЛОКИРУЮЩИЕ/ЗАМЕЧАНИЯ verdict counts for the merge bot (fleet/mergeBot.ts).
   isAuditor: boolean;
+  // Member of a pool: letters to xentra/<pool> are routed to one member (supervisor).
+  pool?: string;
   description: string;
   instructions: string;
 }
@@ -68,6 +70,7 @@ export function parseRole(raw: unknown, instructions: string): Role {
     acceptFrom,
     canRequestPush: r.canRequestPush === true,
     isAuditor: r.auditor === true,
+    pool: typeof r.pool === "string" && /^[a-z0-9-]+$/.test(r.pool) ? r.pool : undefined,
     description: typeof r.description === "string" ? r.description : "",
     instructions,
   };
@@ -87,6 +90,9 @@ export function loadRoles(dir = ROLES_DIR): Role[] {
     roles.push(role);
   }
   const mails = new Set<string>();
+  for (const pool of new Set(roles.map((r) => r.pool).filter(Boolean))) {
+    if (roles.some((r) => r.mail === `xentra/${pool}`)) throw new Error(`pool xentra/${pool} clashes with a role address`);
+  }
   for (const r of roles) {
     if (r.mail === OWNER_ADDRESS) throw new Error(`${r.role}: ${OWNER_ADDRESS} is reserved for the owner`);
     if (mails.has(r.mail)) throw new Error(`duplicate mail address: ${r.mail}`);
@@ -98,4 +104,14 @@ export function loadRoles(dir = ROLES_DIR): Role[] {
 export function senderAllowed(role: Role, from: string): boolean {
   // The owner may always write; acceptFrom narrows everyone else.
   return from === OWNER_ADDRESS || role.acceptFrom.length === 0 || role.acceptFrom.includes(from);
+}
+
+export function poolAddresses(roles: Role[]): Map<string, Role[]> {
+  const out = new Map<string, Role[]>();
+  for (const r of roles) {
+    if (!r.pool) continue;
+    const addr = `xentra/${r.pool}`;
+    out.set(addr, [...(out.get(addr) ?? []), r]);
+  }
+  return out;
 }

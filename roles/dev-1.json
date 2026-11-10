@@ -7,5 +7,6 @@
   "sessionTimeout": "5h",
   "description": "Разработчик: реализует задачу в рабочей копии треда.",
   "defaultRepo": "backend",
-  "acceptFrom": []
+  "acceptFrom": [],
+  "pool": "dev"
 }

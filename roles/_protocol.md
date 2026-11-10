@@ -5,7 +5,8 @@
 блоками в своём ответе, супервизор их проверяет и выполняет после конца сессии.
 
 Адреса (уведомители `xentra/fleet`, `xentra/ci-watch`, `xentra/jira-watch` писем не читают): `xentra/owner`, `xentra/pm`, `xentra/dev-1`, `xentra/dev-2`, `xentra/auditor`,
-`xentra/auditor-codex`, `xentra/tester`.
+`xentra/auditor-codex`, `xentra/tester`; пул разработчиков `xentra/dev` — письмо получит
+свободный разработчик (а по уже начатому треду — тот, кто его вёл).
 
 Блоки ответа (можно несколько, порядок не важен):
 

@@ -292,3 +292,11 @@ export function thread(spool: Spool, threadId: string): Letter[] {
 export function sentBy(spool: Spool, address: string): Letter[] {
   return listLetters(spool.dir("Sent", address), false);
 }
+
+// Hands a letter from one Inbox to another unchanged (pool routing). Atomic rename.
+export function moveToInbox(spool: Spool, fromAddress: string, toAddress: string, id: string): boolean {
+  const src = join(spool.dir("Inbox", fromAddress), `${id}.md`);
+  if (!existsSync(src)) return false;
+  renameSync(src, join(spool.dir("Inbox", toAddress), `${id}.md`));
+  return true;
+}
