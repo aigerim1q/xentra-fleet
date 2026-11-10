@@ -35,6 +35,7 @@ export interface SessionInput {
   cwd: string;
   stateDir: string;
   history: Letter[]; // earlier letters of the thread, for a fresh session
+  memory?: string; // thread/task memory block (fleet/memory.ts), injected every session
 }
 
 export type SessionRunner = (input: SessionInput) => Promise<SessionOutcome>;
@@ -87,6 +88,7 @@ export function buildSessionPrompt(input: SessionInput, resumed: boolean): strin
     }
     parts.push("");
   }
+  if (input.memory) parts.push(input.memory, "");
   parts.push(letters.length > 1 ? `Пришли письма (${letters.length}), обработай все:` : "Пришло письмо:", "");
   for (const l of letters) parts.push(formatLetter(l), "");
   parts.push(

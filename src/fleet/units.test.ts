@@ -61,7 +61,7 @@ test("parseReplyActions reads mail, ack and gates blocks", () => {
 
 test("parseReplyActions: new thread flag and nothing when there are no blocks", () => {
   assert.equal(parseReplyActions('<mail to="xentra/pm" subject="s" thread="new">b</mail>').mails[0].newThread, true);
-  assert.deepEqual(parseReplyActions("просто текст"), { mails: [], acks: [], gates: false });
+  assert.deepEqual(parseReplyActions("просто текст"), { mails: [], acks: [], gates: false, memory: [] });
 });
 
 // --- gate

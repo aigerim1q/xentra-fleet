@@ -4,6 +4,7 @@ import type { Priority } from "./mail.js";
 //   <mail to=".." subject=".." [priority=".."] [thread="new"] [repo=".."]>body</mail>
 //   <ack id=".." [note=".."]/>
 //   <gates/>
+//   <memory scope="thread|task" [key=".."]>text</memory>
 // Parsed leniently (attribute order, quotes ' or ") and validated later, by the
 // supervisor, against the spool — a bad address fails that one block, not the session.
 
@@ -14,12 +15,20 @@ export interface MailAction {
   priority: Priority;
   newThread: boolean;
   repo?: string;
+  key?: string;
+}
+
+export interface MemoryAction {
+  scope: "thread" | "task";
+  key?: string;
+  text: string;
 }
 
 export interface ReplyActions {
   mails: MailAction[];
   acks: Array<{ id: string; note?: string }>;
   gates: boolean;
+  memory: MemoryAction[];
 }
 
 const ATTR = /([a-z-]+)\s*=\s*("([^"]*)"|'([^']*)')/gi;
@@ -47,6 +56,7 @@ export function parseReplyActions(text: string): ReplyActions {
       priority: PRIORITIES.includes(a.priority as Priority) ? (a.priority as Priority) : "normal",
       newThread: a.thread === "new",
       repo: a.repo || undefined,
+      key: a.key || undefined,
     });
   }
   const acks: Array<{ id: string; note?: string }> = [];
@@ -54,5 +64,12 @@ export function parseReplyActions(text: string): ReplyActions {
     const a = attrs(m[1]);
     if (a.id) acks.push({ id: a.id, note: a.note || undefined });
   }
-  return { mails, acks, gates: /<gates\s*\/?>/i.test(text) };
+  const memory: MemoryAction[] = [];
+  for (const m of text.matchAll(/<memory\b([^>]*)>([\s\S]*?)<\/memory>/gi)) {
+    const a = attrs(m[1]);
+    const body = m[2].trim();
+    if (!body) continue;
+    memory.push({ scope: a.scope === "task" ? "task" : "thread", key: a.key || undefined, text: body });
+  }
+  return { mails, acks, gates: /<gates\s*\/?>/i.test(text), memory };
 }

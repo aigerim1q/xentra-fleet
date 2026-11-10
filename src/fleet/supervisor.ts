@@ -6,6 +6,7 @@ import { ack, archive, readInbox, send, thread as threadLetters, type Letter, ty
 import { OWNER_ADDRESS, senderAllowed, type Role } from "./roles.js";
 import type { SessionRunner } from "./session.js";
 import type { FleetLimits } from "./limits.js";
+import { appendMemory, memoryPromptBlock } from "./memory.js";
 import type { RepoTarget } from "./workspace.js";
 
 // One supervisor process for the whole fleet (the CTO fleet runs one runner per role
@@ -163,9 +164,11 @@ export class Supervisor {
     const runningFile = join(this.o.stateDir, `running.${role.role}`);
     mkdirSync(this.o.stateDir, { recursive: true });
     writeFileSync(runningFile, JSON.stringify({ thread: batch.thread, primary: batch.primary.id, startedAt: new Date().toISOString() }));
+    const keys = [...new Set(letters.map((l) => l.key).filter((k): k is string => !!k))];
+    const memory = memoryPromptBlock(this.o.stateDir, batch.thread, keys);
     let outcome;
     try {
-      outcome = await this.o.runSession({ role, batch, cwd, stateDir: this.o.stateDir, history });
+      outcome = await this.o.runSession({ role, batch, cwd, stateDir: this.o.stateDir, history, memory });
     } finally {
       rmSync(runningFile, { force: true });
     }
@@ -184,6 +187,7 @@ export class Supervisor {
           priority: m.priority,
           thread: m.newThread ? undefined : batch.thread,
           repo: m.repo ?? batch.repo,
+          key: m.key ?? keys[0],
         });
         if (!m.newThread) for (const l of letters) answered.add(l.id);
       } catch (err) {
@@ -201,6 +205,16 @@ export class Supervisor {
         answered.add(target.id);
       } catch (err) {
         problems.push(`квитанция на ${a.id}: ${(err as Error).message}`);
+      }
+    }
+
+    for (const m of outcome.actions.memory) {
+      if (m.scope === "thread") {
+        appendMemory(this.o.stateDir, "thread", batch.thread, { role: role.role, text: m.text });
+      } else {
+        const key = m.key ?? keys[0];
+        if (key && /^[A-Z][A-Z0-9]+-\d+$/.test(key)) appendMemory(this.o.stateDir, "task", key, { role: role.role, text: m.text });
+        else problems.push("память задачи не записана: у треда нет ключа Jira — укажи key=\"XEN-…\" в блоке <memory>");
       }
     }
 
