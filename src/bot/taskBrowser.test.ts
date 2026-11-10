@@ -53,6 +53,8 @@ test("card offers take/status/Jira link, and hides 'take' while the bot works on
   const card = taskCardView(issue(7), "https://j.isaqr.kz/");
   const all = buttons(card.keyboard);
   assert.ok(all.some((b) => b.callback_data === CB.take("XEN-7")));
+  assert.ok(all.some((b) => b.callback_data === CB.team("XEN-7")));
+  assert.match(card.text, /🤖 Бот — .*\n👥 Команда — /);
   assert.ok(all.some((b) => b.callback_data === CB.statuses("XEN-7")));
   assert.ok(all.some((b) => b.url === "https://j.isaqr.kz/browse/XEN-7"));
 

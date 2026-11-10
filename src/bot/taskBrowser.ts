@@ -11,12 +11,22 @@ export const CB = {
   list: (page: number) => `tasks:${page}`,
   card: (key: string) => `task:${key}`,
   take: (key: string) => `take:${key}`,
+  team: (key: string) => `team:${key}`,
   statuses: (key: string) => `st:${key}`,
   transition: (key: string, id: string) => `tr:${key}:${id}`,
 };
 
 // Reply-keyboard labels double as the text the bot listens for (bot.hears).
 export const MENU = {
+  tasks: "📋 Задачи",
+  status: "🛰 Что происходит",
+  deputy: "🧑‍💼 Зам. CTO",
+  control: "⚙️ Управление",
+} as const;
+
+// Labels of the previous menu — a phone keeps showing an old persistent keyboard until
+// /start, so these still work and map to the new handlers.
+export const LEGACY_MENU = {
   tasks: "📋 Мои задачи",
   queue: "🤖 Взять в работу",
   status: "📊 Статус",
@@ -24,24 +34,12 @@ export const MENU = {
   stop: "⏹ Стоп",
   help: "❓ Помощь",
   fleet: "🛰 Флот",
-  deputy: "🧑‍💼 Зам. CTO",
 } as const;
 
+export const ALL_MENU_LABELS: string[] = [...Object.values(MENU), ...Object.values(LEGACY_MENU)];
+
 export function mainMenuKeyboard(): Keyboard {
-  return new Keyboard()
-    .text(MENU.tasks)
-    .text(MENU.queue)
-    .row()
-    .text(MENU.fleet)
-    .text(MENU.deputy)
-    .row()
-    .text(MENU.status)
-    .text(MENU.limits)
-    .row()
-    .text(MENU.stop)
-    .text(MENU.help)
-    .resized()
-    .persistent();
+  return new Keyboard().text(MENU.tasks).text(MENU.status).row().text(MENU.deputy).text(MENU.control).resized().persistent();
 }
 
 /** Every task assigned to the owner that isn't done, most recently touched first. */
@@ -111,12 +109,16 @@ export function taskCardView(
     `Статус: ${issue.status ?? "—"}`,
     "",
     description,
+    "",
+    "Кому отдать:",
+    "🤖 Бот — сам доведёт до MR: план → код → тесты → ревью. Быстро, для понятных задач.",
+    "👥 Команда — Зам. CTO, разработчик, два аудитора и тестировщик. Для задач посложнее.",
   ].join("\n");
   const keyboard = new InlineKeyboard();
   if (opts.botBusyWith === issue.key) {
     keyboard.text("⏳ Бот уже работает над ней", CB.card(issue.key)).row();
   } else {
-    keyboard.text("🤖 Взять в работу ботом", CB.take(issue.key)).row();
+    keyboard.text("🤖 Бот", CB.take(issue.key)).text("👥 Команда", CB.team(issue.key)).row();
   }
   keyboard
     .text("🔀 Сменить статус", CB.statuses(issue.key))

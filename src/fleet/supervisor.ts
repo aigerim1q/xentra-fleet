@@ -12,6 +12,7 @@ import { branchFor } from "./workspace.js";
 import { fileRequest, loadPush } from "./pushRequests.js";
 import { WATCHER_ADDRESSES, addCiWatch } from "./watchers.js";
 import { recordVerdict } from "./mergeBot.js";
+import { HEARTBEAT_FILE } from "./names.js";
 import { appendFileSync } from "node:fs";
 import type { RepoTarget } from "./workspace.js";
 
@@ -111,8 +112,21 @@ export class Supervisor {
   async stop(): Promise<void> {
     this.stopped = true;
     clearInterval(this.timer);
+    rmSync(join(this.o.stateDir, HEARTBEAT_FILE), { force: true });
     for (const w of this.watchers) w.close();
     await Promise.all(this.running);
+  }
+
+  // Heartbeat for the bot ("команда запущена"), refreshed every loop; only a running
+  // supervisor (start()) beats — `fleet once` and tests don't pretend to be alive.
+  private beat(): void {
+    if (!this.timer) return;
+    try {
+      mkdirSync(this.o.stateDir, { recursive: true });
+      writeFileSync(join(this.o.stateDir, HEARTBEAT_FILE), new Date().toISOString());
+    } catch {
+      /* best-effort */
+    }
   }
 
   // Runs until no role has anything left to do (used by `fleet once` and tests).
@@ -128,6 +142,7 @@ export class Supervisor {
   // promises so tests (and `fleet once`) can wait for them.
   tick(): Promise<void>[] {
     const started: Promise<void>[] = [];
+    this.beat();
     this.routePools();
     for (const role of this.o.roles) {
       if (this.busyRoles.has(role.role)) continue;

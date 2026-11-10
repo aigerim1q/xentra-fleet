@@ -4,6 +4,7 @@ import {
   CB,
   MENU,
   mainMenuKeyboard,
+  LEGACY_MENU,
   myOpenTasksJql,
   taskCardView,
   taskListView,
@@ -42,7 +43,7 @@ import {
 } from "../queue.js";
 import { killCurrentTurn, runClaudeTurn } from "../engine/claudeEngine.js";
 import { killCodexReview } from "../engine/codexReview.js";
-import { installOwnerBridge } from "../fleet/telegramBridge.js";
+import { installOwnerBridge, type OwnerBridge } from "../fleet/telegramBridge.js";
 
 /** Chat must be allowlisted; when TELEGRAM_ALLOWED_USER_IDS is set, the sender too. */
 export function isAuthorizedSender(
@@ -64,36 +65,22 @@ function statusTag(status: string | undefined): string {
   return "[?]"; // shouldn't happen — listMenuCandidates already filters to these two
 }
 
-// Everything user-facing in this file speaks as one persona — "Зам. CEO" — not as a
+// Everything user-facing in this file speaks as one persona — "Зам. CTO" — not as a
 // bare command dispatcher. The user explicitly wants this bot to feel like talking to
 // someone who's actually handling the tickets, not reading machine log lines; the
 // underlying data (cost, plans, diffs) is never invented or reworded, only the framing
 // around it is. See classifyMessage below for the free-text half of this.
 const HELP_TEXT = [
-  "Я — твой зам. CEO по тикетам из Jira: слежу за очередью, читаю задачу и предлагаю решение, а как только одобришь — довожу до MR и держу в курсе на каждом шаге.",
+  "Я — твой Зам. CTO. Веду задачи из Jira до merge request, а ты решаешь главное.",
   "",
-  "/start — меню внизу и список твоих задач («Сделать» + «В работе»): выбери — начну разбираться именно с этой",
-  "/tasks или «📋 Мои задачи» — все твои открытые задачи; в карточке можно сменить статус в Jira или отдать задачу мне",
-  "/stop — деактивирую кнопки в уже показанных списках (то, что уже в работе или ждёт твоего решения, не трогаю)",
-  "/kill — немедленно прерву текущий ход (если завис или делает не то)",
-  "/status — расскажу, что сейчас происходит, расход, последний обработанный тикет",
-  "/metrics — исторический трек-рекорд: доля задач без эскалации, средние стоимость/время/раунды ревью",
-  "/limits или «⚡️ Лимиты» — сколько лимитов на сегодня уже использовано (оценка по токенам, не деньги)",
-  "/peek — покажу следующий тикет в очереди, не запуская его",
-  "/retry XEN-123 — верну тикет, застрявший в «нужен человек», обратно в очередь",
-  "«нужен человек» — сразу присылаю diff с кнопками ✅ Принять/❌ Отклонить: можно запушить уже сделанную работу вручную, даже если сам я сдался",
-  "брифы — если разработчику что-то реально неясно, не додумывает: присылаю вопрос с вариантами, выбираешь кнопкой, он продолжает с тем же контекстом",
-  "/dashboard — ссылка на живой локальный дашборд",
-  "/fleet <задача> — поставить задачу флоту ролей (письмо pm); письма флота мне приходят сюда, ответ — реплаем",
-  "/holds, /release <тред> — треды, остановленные защитой от зацикливания",
-  "«🛰 Флот» или /fleet_status — что делает флот, очереди, лимиты, кнопки «Сессии» и «Метрики»; /sessions — последние сессии агентов: что делали и как открыть в терминале",
-  "«🧑‍💼 Зам. CTO» или /deputy — разговор с pm флота в постоянном треде: помнит прошлые разговоры, видит весь флот, может поставить задачу",
-  "/fleet_status — /fleet_pause [роль], /fleet_resume [роль], /fleet_override — пауза и снятие дневных лимитов",
-  "/veto <тред>, /unveto <тред> — запретить или разрешить мерж MR треда",
-  "/fleet_metrics [дней] — метрики флота: время до MR, возвраты, твоё внимание, стоимость по ролям и моделям",
-  "/help — это сообщение",
+  "📋 Задачи — твои задачи из Jira. Открой задачу и выбери, кто её сделает:",
+  "   🤖 Бот — сам доведёт до MR, быстро; 👥 Команда — разработчик, два аудитора и тестировщик.",
+  "🛰 Что происходит — кто над чем работает и что ждёт твоего решения.",
+  "🧑‍💼 Зам. CTO — просто пиши мне, как человеку: спросить, обсудить, поставить задачу.",
+  "⚙️ Управление — пауза, остановка, лимиты.",
   "",
-  "Можешь просто написать мне, без команды — отвечу или сделаю то, что просишь, если это похоже на одну из команд выше.",
+  "Когда нужно твоё решение, я пришлю сообщение с кнопками. На письмо команды можно ответить реплаем.",
+  "Push, мерж и закрытие задачи — только по твоей кнопке.",
 ].join("\n");
 
 function describeOutcome(outcome: QueueRunOutcome | { kind: "error"; message: string }): string | null {
@@ -391,7 +378,7 @@ export async function startBot(): Promise<void> {
   // The role fleet's owner mailbox lives in this chat (fleet/telegramBridge.ts). Installed
   // AFTER the access guard above (its commands and replies must be owner-only) and before
   // the free-text handler below: it takes only replies to forwarded letters.
-  if (config.fleetBridgeEnabled) installOwnerBridge(bot, Number(announceChatId));
+  const bridge: OwnerBridge | undefined = config.fleetBridgeEnabled ? installOwnerBridge(bot, Number(announceChatId)) : undefined;
 
   function menuLine(c: Candidate): string {
     return `${statusTag(c.issue.status)} ${c.issue.key}: ${c.issue.summary}`;
@@ -435,10 +422,7 @@ export async function startBot(): Promise<void> {
   }
 
   bot.command("start", async (ctx) => {
-    await ctx.reply("Меню внизу: задачи, статус, бюджет. Список «взять в работу» — ниже.", {
-      reply_markup: mainMenuKeyboard(),
-    });
-    await sendTicketMenu(ctx, undefined, { resume: true });
+    await ctx.reply(HELP_TEXT, { reply_markup: mainMenuKeyboard() });
   });
   bot.command("menu", (ctx) => ctx.reply("Меню открыто.", { reply_markup: mainMenuKeyboard() }));
 
@@ -475,12 +459,131 @@ export async function startBot(): Promise<void> {
   }
 
   bot.command("tasks", (ctx) => showTaskList(ctx, 0, false));
-  bot.hears(MENU.tasks, (ctx) => showTaskList(ctx, 0, false));
-  bot.hears(MENU.queue, (ctx) => sendTicketMenu(ctx, undefined, { resume: true }));
-  bot.hears(MENU.status, (ctx) => handleStatus(ctx));
-  bot.hears(MENU.limits, (ctx) => handleBudget(ctx));
-  bot.hears(MENU.stop, (ctx) => handleStop(ctx));
-  bot.hears(MENU.help, (ctx) => handleHelp(ctx));
+  // ── Main menu: Задачи · Что происходит · Зам. CTO · Управление ──
+  bot.hears([MENU.tasks, LEGACY_MENU.tasks], (ctx) => showTaskList(ctx, 0, false));
+  bot.hears(LEGACY_MENU.queue, (ctx) => sendTicketMenu(ctx, undefined, { resume: true }));
+  bot.hears([MENU.status, LEGACY_MENU.status, LEGACY_MENU.fleet], (ctx) => showOverview(ctx));
+  bot.hears(LEGACY_MENU.limits, (ctx) => handleBudget(ctx));
+  bot.hears(LEGACY_MENU.stop, (ctx) => handleStop(ctx));
+  bot.hears(LEGACY_MENU.help, (ctx) => handleHelp(ctx));
+  bot.hears(MENU.deputy, (ctx) =>
+    bridge ? bridge.deputyIntro(ctx) : ctx.reply("Команда (флот ролей) отключена в настройках бота (FLEET_BRIDGE_ENABLED)."),
+  );
+  bot.hears(MENU.control, (ctx) => showControl(ctx));
+
+  // One picture of everything: the bot's own task and the team.
+  function overviewText(): string {
+    const live = getLiveState();
+    const job = live.currentJob;
+    const waitingOn = live.pendingApproval?.issueKey ?? live.pendingHumanReview?.issueKey ?? live.pendingBrief?.issueKey;
+    const lines = [
+      `🛰 Что происходит · ${new Date().toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}`,
+      "",
+      `🤖 Бот: ${job ? `работает над ${job.issueKey}` : state.running ? "ищет новые тикеты" : "свободен"}`,
+    ];
+    if (waitingOn) lines.push(`   🙋 ждёт твоего решения: ${waitingOn}`);
+    lines.push(`   💰 сегодня ~$${costSince(state, startOfTodayIso()).toFixed(2)} (оценка по токенам)`);
+    if (bridge) lines.push("", ...bridge.statusLines());
+    return lines.join("\n");
+  }
+  const overviewKeyboard = () => {
+    const kb = new InlineKeyboard().text("🔄 Обновить", "ov:refresh");
+    if (bridge) kb.text("📜 Сессии", "ov:sessions").row().text("📈 Метрики", "ov:metrics");
+    return kb.text("⚙️ Управление", "ctl:menu");
+  };
+  async function showOverview(ctx: Context): Promise<void> {
+    await ctx.reply(overviewText(), { reply_markup: overviewKeyboard() });
+  }
+  bot.command("fleet_status", showOverview);
+  bot.callbackQuery("ov:refresh", async (ctx) => {
+    await ctx.answerCallbackQuery({ text: "Обновлено" });
+    await ctx.editMessageText(overviewText(), { reply_markup: overviewKeyboard() }).catch(() => {});
+  });
+  bot.callbackQuery("ov:sessions", async (ctx) => {
+    await ctx.answerCallbackQuery();
+    await bridge?.showSessions(ctx);
+  });
+  bot.callbackQuery("ov:metrics", async (ctx) => {
+    await ctx.answerCallbackQuery();
+    await handleMetrics(ctx);
+    await bridge?.showMetrics(ctx);
+  });
+
+  // Every switch in one place, as buttons — no commands to remember.
+  function controlView(): { text: string; keyboard: InlineKeyboard } {
+    const kb = new InlineKeyboard();
+    const lines = ["⚙️ Управление"];
+    if (bridge) {
+      lines.push("", bridge.limitsSummary());
+      kb.text(bridge.isPaused() ? "▶️ Возобновить команду" : "⏸ Пауза команды", bridge.isPaused() ? "ctl:resume" : "ctl:pause").row();
+      kb.text("⚡️ Снять дневные лимиты до конца дня", "ctl:override").row();
+      for (const h of bridge.holds()) kb.text(`▶️ Снять остановку: ${h.title.slice(0, 40)}`, `fleet_rel:${h.token}`).row();
+    }
+    kb.text("💰 Расход бота за день", "ctl:limits").row();
+    kb.text("⛔ Прервать текущую работу бота", "ctl:kill").row();
+    kb.text(state.running ? "⏹ Не брать новые тикеты" : "⏹ Новые тикеты не беру", "ctl:stop");
+    lines.push(
+      "",
+      "Пауза — новые сессии команды не стартуют, текущие доработают.",
+      "Прервать — остановить то, что бот делает прямо сейчас.",
+    );
+    return { text: lines.join("\n"), keyboard: kb };
+  }
+  async function showControl(ctx: Context): Promise<void> {
+    const v = controlView();
+    await ctx.reply(v.text, { reply_markup: v.keyboard });
+  }
+  const refreshControl = async (ctx: Context, note: string) => {
+    await ctx.answerCallbackQuery({ text: note });
+    const v = controlView();
+    await ctx.editMessageText(v.text, { reply_markup: v.keyboard }).catch(() => {});
+  };
+  bot.callbackQuery("ctl:menu", async (ctx) => {
+    await ctx.answerCallbackQuery();
+    await showControl(ctx);
+  });
+  bot.callbackQuery("ctl:pause", async (ctx) => {
+    bridge?.pause();
+    await refreshControl(ctx, "Команда на паузе");
+  });
+  bot.callbackQuery("ctl:resume", async (ctx) => {
+    bridge?.resume();
+    await refreshControl(ctx, "Команда снова работает");
+  });
+  bot.callbackQuery("ctl:override", async (ctx) => {
+    bridge?.overrideToday();
+    await refreshControl(ctx, "Лимиты сняты до конца дня");
+  });
+  bot.callbackQuery("ctl:limits", async (ctx) => {
+    await ctx.answerCallbackQuery();
+    await handleBudget(ctx);
+  });
+  bot.callbackQuery("ctl:kill", async (ctx) => {
+    await ctx.answerCallbackQuery();
+    await handleKill(ctx);
+  });
+  bot.callbackQuery("ctl:stop", async (ctx) => {
+    await ctx.answerCallbackQuery();
+    await handleStop(ctx);
+  });
+
+  // «👥 Команда» on a task card: the task goes to Зам. CTO as a new thread.
+  bot.callbackQuery(/^team:(.+)$/, async (ctx) => {
+    const key = ctx.match[1];
+    if (!bridge) return void (await ctx.answerCallbackQuery({ text: "Команда отключена в настройках", show_alert: true }));
+    await ctx.answerCallbackQuery({ text: "Передаю команде…" });
+    try {
+      const issue = await jira.getIssue(key);
+      bridge.assignToTeam({ key: issue.key, summary: issue.summary, description: issue.description });
+      await ctx.reply(
+        bridge.alive()
+          ? `👥 ${key} у команды. Зам. CTO разберёт задачу и напишет план.`
+          : `👥 ${key} передана команде, но команда сейчас не запущена — задача подождёт. Запусти на ноутбуке: node dist/cli.js fleet run`,
+      );
+    } catch (err) {
+      await ctx.reply(`Не получилось передать ${key}: ${(err as Error).message}`);
+    }
+  });
 
   bot.callbackQuery(/^tasks:(\d+)$/, async (ctx) => {
     await ctx.answerCallbackQuery();
@@ -929,7 +1032,7 @@ export async function startBot(): Promise<void> {
     return { intent: "chat", reply: raw.trim() || "Не понял, можешь переформулировать?" };
   }
 
-  // This is the actual conversational half of the "Зам. CEO" persona — everywhere else
+  // This is the actual conversational half of the "Зам. CTO" persona — everywhere else
   // in this file reports structured outcomes, but a free-text message is exactly where
   // the user is talking to someone, not clicking a button. The model answers in
   // character, but never invents bot data: a request for real numbers (cost/status/
@@ -937,7 +1040,7 @@ export async function startBot(): Promise<void> {
   // "chat" reply.
   async function classifyMessage(text: string): Promise<ChatIntent> {
     const prompt = [
-      "Ты — Зам. CEO внутри бота xentra-fleet: ты на прямой связи с CEO по работе над",
+      "Ты — Зам. CTO внутри бота xentra-fleet: ты на прямой связи с владельцем по работе над",
       "тикетами из Jira. Любое его сообщение без команды попадает сюда. Если ответ требует",
       "РЕАЛЬНЫХ живых данных (расход, статус, очередь) — не выдумывай их сам, выбери",
       "соответствующий intent: бот сходит за настоящими данными и пришлёт их отдельным",
@@ -964,7 +1067,7 @@ export async function startBot(): Promise<void> {
       'Сомневаешься между командой и chat — выбирай команду: худший случай — лишний,',
       "но верный ответ, а не отказ там, где ты мог помочь.",
       "",
-      `Сообщение CEO: "${text}"`,
+      `Сообщение владельца: "${text}"`,
     ].join("\n");
 
     const turn = await runClaudeTurn({
@@ -991,7 +1094,7 @@ export async function startBot(): Promise<void> {
       switch (parsed.intent) {
         case "status":
           await clear();
-          await handleStatus(ctx);
+          await showOverview(ctx);
           break;
         case "metrics":
           await clear();

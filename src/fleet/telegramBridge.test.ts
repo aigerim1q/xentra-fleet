@@ -93,7 +93,7 @@ test("forwards owner mail to the chat, and a reply goes back into the thread", a
     assert.ok(fresh);
     assert.notEqual(fresh!.thread, letter.thread);
   } finally {
-    stop();
+    stop.stop();
   }
 });
 
@@ -138,7 +138,7 @@ test("a push request shows Push/Decline buttons, and Push runs the push and tell
     const note = readInbox(spool, "xentra/pm").find((l) => l.subject === "Push выполнен");
     assert.match(note!.body, /mr\/3/);
   } finally {
-    stop();
+    stop.stop();
   }
 });
 
@@ -164,43 +164,61 @@ function fakeBot() {
   return { bot, sent, msg, tap };
 }
 
-test("Зам. CTO: menu button turns the mode on, plain text goes to pm's deputy thread, menu taps pass through", async () => {
+test("Зам. CTO: while the team runs, plain text goes to pm's deputy thread; menu taps and a stopped team pass through", async () => {
   const { MENU } = await import("../bot/taskBrowser.js");
   const { DEPUTY_THREAD } = await import("./deputy.js");
-  const { bot, sent, msg, tap } = fakeBot();
+  const { HEARTBEAT_FILE } = await import("./names.js");
+  const { mkdirSync, writeFileSync, rmSync: rmf } = await import("node:fs");
+  const { bot, sent, msg } = fakeBot();
   let fellThrough = 0;
   const stop = installOwnerBridge(bot, 7, { pollMs: 60_000 });
   bot.on("message:text", () => void fellThrough++);
+  const beat = join(home, "state", HEARTBEAT_FILE);
   try {
     const spool = new Spool();
-    await bot.handleUpdate(msg(MENU.deputy));
-    assert.match(sent.at(-1)!.text, /Режим «Зам\. CTO»/);
-    await bot.handleUpdate(msg("Что сейчас делает флот?"));
+    await bot.handleUpdate(msg("Что сейчас делает команда?"));
+    assert.equal(fellThrough, 1, "team down: the bot's own handler answers");
+
+    mkdirSync(join(home, "state"), { recursive: true });
+    writeFileSync(beat, "now");
+    await bot.handleUpdate(msg("Что сейчас делает команда?"));
     const toPm = readInbox(spool, "xentra/pm").filter((l) => l.thread === DEPUTY_THREAD);
     assert.equal(toPm.length, 1);
-    assert.equal(toPm[0].body, "Что сейчас делает флот?");
+    assert.equal(toPm[0].body, "Что сейчас делает команда?");
     await bot.handleUpdate(msg(MENU.tasks));
-    assert.equal(fellThrough, 1, "menu labels must reach the bot's own handlers");
-    assert.equal(readInbox(spool, "xentra/pm").filter((l) => l.thread === DEPUTY_THREAD).length, 1);
+    assert.equal(fellThrough, 2, "menu labels must reach the bot's own handlers");
 
     // pm answers in the deputy thread -> shows as a conversation and is archived
-    send(spool, { from: "xentra/pm", to: [OWNER_ADDRESS], subject: "Re", body: "Сейчас dev-1 делает XEN-55.", thread: DEPUTY_THREAD });
-    stop();
+    send(spool, { from: "xentra/pm", to: [OWNER_ADDRESS], subject: "Re", body: "Сейчас Разработчик 1 делает XEN-55.", thread: DEPUTY_THREAD });
+    stop.stop();
     const stop2 = installOwnerBridge(bot, 7, { pollMs: 60_000 });
     await new Promise((r) => setTimeout(r, 50));
-    assert.ok(sent.some((m) => m.text === "🧑‍💼 Зам. CTO\n\nСейчас dev-1 делает XEN-55."));
+    assert.ok(sent.some((m) => m.text === "🧑‍💼 Сейчас Разработчик 1 делает XEN-55."));
     assert.equal(readInbox(spool, OWNER_ADDRESS).filter((l) => l.thread === DEPUTY_THREAD).length, 0);
-    stop2();
-
-    await bot.handleUpdate(tap("fleet_dep:off"));
-    await bot.handleUpdate(msg("просто текст"));
-    assert.equal(fellThrough, 2);
+    stop2.stop();
   } finally {
-    stop();
+    rmf(beat, { force: true });
+    stop.stop();
   }
 });
 
-test("🛰 Флот shows the status with buttons; Сессии lists journals and opens a readable card", async () => {
+test("letters show plain role names and the task title, not internal ids", async () => {
+  const spool = new Spool();
+  const task = send(spool, { from: OWNER_ADDRESS, to: ["xentra/pm"], subject: "Фильтр архива", body: "", key: "XEN-77" });
+  send(spool, { from: "xentra/dev-1", to: [OWNER_ADDRESS], subject: "Вопрос", body: "Как быть?", thread: task.thread });
+  const { bot, sent } = fakeBot();
+  const stop = installOwnerBridge(bot, 7, { pollMs: 60_000 });
+  try {
+    await new Promise((r) => setTimeout(r, 50));
+    const m = sent.find((x) => x.text.includes("Как быть?"))!;
+    assert.match(m.text, /^✉️ Разработчик 1 · XEN-77 · Фильтр архива/);
+    assert.doesNotMatch(m.text, new RegExp(task.thread));
+  } finally {
+    stop.stop();
+  }
+});
+
+test("/sessions lists journals with readable names and opens a card with the open command", async () => {
   const { MENU } = await import("../bot/taskBrowser.js");
   const { mkdirSync, writeFileSync } = await import("node:fs");
   const dir = join(home, "state", "tasks", "fleet-tview", "sessions");
@@ -216,12 +234,9 @@ test("🛰 Флот shows the status with buttons; Сессии lists journals a
   const { bot, sent, msg, tap } = fakeBot();
   const stop = installOwnerBridge(bot, 7, { pollMs: 60_000 });
   try {
-    await bot.handleUpdate(msg(MENU.fleet));
-    assert.match(sent.at(-1)!.text, /🛰 Флот ролей/);
-    assert.match(JSON.stringify(sent.at(-1)!.markup), /fleet_st:sessions/);
-    await bot.handleUpdate(tap("fleet_st:sessions"));
+    await bot.handleUpdate(msg("/sessions"));
     const list = JSON.stringify(sent.at(-1)!.markup);
-    const btn = /"text":"[^"]*tview[^"]*dev-1","callback_data":"(fleet_sess:\d+)"/.exec(list);
+    const btn = /"text":"[^"]*Разработчик 1 · tview","callback_data":"(fleet_sess:\d+)"/.exec(list);
     assert.ok(btn, `session button expected in ${list}`);
     await bot.handleUpdate(tap(btn[1]));
     const card = sent.at(-1)!;
@@ -229,7 +244,7 @@ test("🛰 Флот shows the status with buttons; Сессии lists journals a
     assert.match(card.text, /→ Правка src\/&lt;a&gt;\.ts/);
     assert.match(card.text, /cd \/wt\/x &amp;&amp; claude --resume aaaaaaaa-1111 --fork-session/);
   } finally {
-    stop();
+    stop.stop();
   }
 });
 
