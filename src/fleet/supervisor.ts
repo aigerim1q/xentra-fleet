@@ -47,6 +47,8 @@ export interface SupervisorOptions {
   pollMs?: number;
   // Start gate (pause, daily caps, override). Absent = no limits (tests, `fleet once`).
   limits?: FleetLimits;
+  // Extra context for a thread's session (e.g. the fleet snapshot in the owner's deputy thread).
+  threadContext?: (thread: string, role: Role) => string | undefined;
 }
 
 export class Supervisor {
@@ -197,7 +199,8 @@ export class Supervisor {
     mkdirSync(this.o.stateDir, { recursive: true });
     writeFileSync(runningFile, JSON.stringify({ thread: batch.thread, primary: batch.primary.id, startedAt: new Date().toISOString() }));
     const keys = [...new Set(letters.map((l) => l.key).filter((k): k is string => !!k))];
-    const memory = memoryPromptBlock(this.o.stateDir, batch.thread, keys);
+    const extra = this.o.threadContext?.(batch.thread, role);
+    const memory = [memoryPromptBlock(this.o.stateDir, batch.thread, keys), extra].filter(Boolean).join("\n\n");
     let outcome;
     const t0 = Date.now();
     try {

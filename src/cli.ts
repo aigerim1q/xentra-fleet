@@ -239,6 +239,36 @@ program
     watchJournals(dirs, { task: o.task, role: o.role, tail: Number(o.tail), follow: !!o.follow });
   });
 
+program
+  .command("open [n]")
+  .description("Open a recent agent session in Claude Code (as a fork — the agent's own session is untouched)")
+  .action(async (n?: string) => {
+    const { join } = await import("node:path");
+    const { spawn } = await import("node:child_process");
+    const { createInterface } = await import("node:readline/promises");
+    const { HARNESS_STATE_DIR } = await import("./bot/liveState.js");
+    const { fleetHome } = await import("./fleet/workspace.js");
+    const { listJournals, sessionInfo } = await import("./engine/sessionView.js");
+    const rows = listJournals([HARNESS_STATE_DIR, join(fleetHome(), "state")])
+      .map((j) => ({ j, s: sessionInfo(j.path) }))
+      .filter((r) => r.s.sessionId && r.s.cwd)
+      .slice(-15)
+      .reverse();
+    if (rows.length === 0) return void console.log("(сессий пока нет)");
+    let pick = n;
+    if (!pick) {
+      rows.forEach((r, i) => console.log(`${String(i + 1).padStart(2)}. ${new Date(r.j.mtimeMs).toLocaleString("ru-RU")}  ${r.j.task}  ${r.j.label}`));
+      const rl = createInterface({ input: process.stdin, output: process.stdout });
+      pick = (await rl.question("Номер сессии: ")).trim();
+      rl.close();
+    }
+    const row = rows[Number(pick) - 1];
+    if (!row) return void console.log("Нет такого номера.");
+    console.log(`Открываю копию сессии ${row.s.sessionId} в ${row.s.cwd}…`);
+    const child = spawn("claude", ["--resume", row.s.sessionId!, "--fork-session"], { cwd: row.s.cwd, stdio: "inherit" });
+    await new Promise((r) => child.on("close", r));
+  });
+
 registerFleetCommands(program);
 
 program.parseAsync(process.argv);

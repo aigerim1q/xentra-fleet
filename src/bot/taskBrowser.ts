@@ -23,12 +23,17 @@ export const MENU = {
   limits: "⚡️ Лимиты",
   stop: "⏹ Стоп",
   help: "❓ Помощь",
+  fleet: "🛰 Флот",
+  deputy: "🧑‍💼 Зам. CTO",
 } as const;
 
 export function mainMenuKeyboard(): Keyboard {
   return new Keyboard()
     .text(MENU.tasks)
     .text(MENU.queue)
+    .row()
+    .text(MENU.fleet)
+    .text(MENU.deputy)
     .row()
     .text(MENU.status)
     .text(MENU.limits)

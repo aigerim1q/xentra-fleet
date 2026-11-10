@@ -14,6 +14,7 @@ import { secretValues } from "../config.js";
 import { commitWorkspace, ensureWorkspace, fleetHome, runWorkspaceGates, workspaceDiff, workspaceHead, type RepoTarget } from "./workspace.js";
 import { mergeModeFromEnv, pollMerges } from "./mergeBot.js";
 import { computeMetrics, formatMetrics } from "./metrics.js";
+import { DEPUTY_THREAD, fleetSnapshot } from "./deputy.js";
 import { mergeMergeRequest } from "../gitlab.js";
 
 // `fleet …` commands: the supervisor (`run`, `once`), the owner's mailbox from the
@@ -26,11 +27,15 @@ async function buildSupervisor(log: (l: string) => void, opts: { limits: boolean
       ? { kind, path: r.path, baseBranch: config.gitlab.targetBranch, gates: r.gates, gitlabProjectPath: r.gitlabProjectPath }
       : undefined;
   };
+  const spool = new Spool();
+  const roles = loadRoles();
+  const stateDir = join(fleetHome(), "state");
   return new Supervisor({
-    spool: new Spool(),
-    roles: loadRoles(),
+    spool,
+    roles,
+    threadContext: (thread) => (thread === DEPUTY_THREAD ? fleetSnapshot(spool, stateDir, roles) : undefined),
     repos: { backend: repo("backend"), frontend: repo("frontend") },
-    stateDir: join(fleetHome(), "state"),
+    stateDir,
     runSession: runRoleSession,
     workspace: { ensure: ensureWorkspace, commit: commitWorkspace, gates: runWorkspaceGates, diffStat: workspaceDiff, headSha: workspaceHead },
     log,

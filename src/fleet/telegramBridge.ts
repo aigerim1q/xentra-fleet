@@ -14,6 +14,10 @@ import { createMergeRequest, getMergeRequestPipeline, mergeMergeRequest, pushBra
 import { checkReadiness, setVeto, type MergeDeps } from "./mergeBot.js";
 import { config } from "../config.js";
 import { existsSync, readdirSync } from "node:fs";
+import { MENU } from "../bot/taskBrowser.js";
+import { DEPUTY_THREAD } from "./deputy.js";
+import { formatEvent, listJournals, sessionInfo } from "../engine/sessionView.js";
+import { HARNESS_STATE_DIR } from "../bot/liveState.js";
 
 // The owner is a mailbox (xentra/owner) the fleet writes to; this bridge makes that
 // mailbox live in Telegram, as the CTO is the human end of his fleet:
@@ -39,6 +43,27 @@ interface BridgeState {
   // Short tokens for button data (Telegram caps it at 64 bytes; thread ids are longer).
   tokens?: Record<string, string>;
   nextToken?: number;
+  // "Зам. CTO" mode: plain messages go to pm in the permanent deputy thread.
+  deputyMode?: boolean;
+}
+
+const MENU_LABELS: string[] = Object.values(MENU);
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+// Readable tail of one session journal + the command to open it in Claude Code.
+export function sessionCard(path: string, task: string, label: string, maxLines = 25): string {
+  const lines = readFileSync(path, "utf8").split("\n").flatMap((l) => (l ? formatEvent(l, { textChars: 250 }) : []));
+  const info = sessionInfo(path);
+  const shown = lines.slice(-maxLines);
+  const body = escapeHtml(shown.join("\n")).slice(-3000);
+  const open =
+    info.sessionId && info.cwd
+      ? `\n\nОткрыть в терминале:\n<code>cd ${escapeHtml(info.cwd)} &amp;&amp; claude --resume ${info.sessionId} --fork-session</code>`
+      : "";
+  return `<b>${escapeHtml(task)} · ${escapeHtml(label)}</b>${lines.length > maxLines ? ` (последние ${maxLines} из ${lines.length})` : ""}\n\n${body || "(пусто)"}${open}`;
 }
 
 export const realPushDeps: PushDeps = {
@@ -77,6 +102,10 @@ function saveState(st: BridgeState): void {
   const keys = Object.keys(st.forwarded);
   if (keys.length > 500) for (const k of keys.slice(0, keys.length - 500)) delete st.forwarded[k];
   st.seen = st.seen.slice(-2000);
+  if (st.tokens) {
+    const tk = Object.keys(st.tokens);
+    if (tk.length > 500) for (const k of tk.slice(0, tk.length - 500)) delete st.tokens[k];
+  }
   writeFileSync(statePath(), JSON.stringify(st, null, 2));
 }
 
@@ -136,6 +165,22 @@ export function installOwnerBridge(
       }
       if (l.from === FLEET_ADDRESS && l.subject.startsWith("Готово к мержу") && loadPush(stateDir, l.thread)?.mr) {
         kb.text("🔀 Смержить", `fleet_merge:${tokenFor(l.thread)}`).row();
+      }
+      if (l.thread === DEPUTY_THREAD && l.from === "xentra/pm") {
+        // The deputy chat reads like a conversation: no thread footer, no buttons, and the
+        // letter is archived right away — the chat itself is the record.
+        try {
+          const text = `🧑‍💼 Зам. CTO\n\n${l.body}`.slice(0, MAX_TG);
+          const msg = await bot.api.sendMessage(chatId, text);
+          st.forwarded[String(msg.message_id)] = { letterId: l.id, thread: l.thread, from: l.from, repo: l.repo, subject: l.subject };
+          st.seen.push(l.id);
+          saveState(st);
+          archive(spool, OWNER_ADDRESS, l.id);
+        } catch (err) {
+          console.error("[fleet-bridge] forward failed:", (err as Error).message);
+          return;
+        }
+        continue;
       }
       kb.text("✅ Прочитано", `fleet_read:${l.id}`);
       try {
@@ -252,8 +297,7 @@ export function installOwnerBridge(
     return roleNames.includes(r) ? r : null;
   };
 
-  bot.command("fleet_status", async (ctx) => {
-    const stateDir = join(fleetHome(), "state");
+  function fleetStatusText(): string {
     const running = existsSync(stateDir)
       ? readdirSync(stateDir)
           .filter((f) => f.startsWith("running."))
@@ -271,18 +315,95 @@ export function installOwnerBridge(
       .filter(([, n]) => n > 0)
       .map(([r, n]) => `📥 ${r}: ${n}`);
     const holds = listHolds(spool);
+    return [
+      `🛰 Флот ролей · ${new Date().toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}`,
+      limits.summary(),
+      "",
+      running.length ? running.join("\n") : "Сейчас никто не работает.",
+      queue.length ? queue.join("\n") : "Очереди пусты.",
+      holds.length ? `⛔ Остановлены треды: ${holds.join(", ")}` : "",
+      "",
+      "/fleet_pause [роль] · /fleet_resume [роль] · /fleet_override",
+    ]
+      .filter((x, i, a) => x !== "" || a[i - 1] !== "")
+      .join("\n");
+  }
+
+  const statusKeyboard = () =>
+    new InlineKeyboard()
+      .text("🔄 Обновить", "fleet_st:refresh")
+      .text("📜 Сессии", "fleet_st:sessions")
+      .row()
+      .text("📈 Метрики", "fleet_st:metrics")
+      .text("🧑‍💼 Зам. CTO", "fleet_dep:on");
+
+  const showStatus = (ctx: Context) => ctx.reply(fleetStatusText(), { reply_markup: statusKeyboard() });
+  bot.command("fleet_status", showStatus);
+  bot.hears(MENU.fleet, showStatus);
+
+  bot.callbackQuery("fleet_st:refresh", async (ctx) => {
+    await ctx.answerCallbackQuery({ text: "Обновлено" });
+    await ctx.editMessageText(fleetStatusText(), { reply_markup: statusKeyboard() }).catch(() => {});
+  });
+
+  bot.callbackQuery("fleet_st:metrics", async (ctx) => {
+    await ctx.answerCallbackQuery();
+    const text = formatMetrics(computeMetrics(spool, stateDir, loadRoles(), Date.now() - 7 * 86_400_000));
+    await ctx.reply(text.length > 3900 ? `${text.slice(0, 3900)}…` : text);
+  });
+
+  // Recent agent sessions of both the pipeline and the fleet, newest first, as buttons.
+  const showSessions = async (ctx: Context) => {
+    const journals = listJournals([HARNESS_STATE_DIR, stateDir]).slice(-10).reverse();
+    if (journals.length === 0) {
+      await ctx.reply("Сессий пока нет — агенты ещё не работали.");
+      return;
+    }
+    const kb = new InlineKeyboard();
+    for (const j of journals) {
+      const when = new Date(j.mtimeMs).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+      const task = j.task.startsWith("fleet-") ? j.task.slice(6, 30) : j.task;
+      kb.text(`${when} · ${task} · ${j.label}`, `fleet_sess:${tokenFor(j.path)}`).row();
+    }
+    saveState(st);
+    await ctx.reply("Последние сессии агентов — нажми, чтобы посмотреть:", { reply_markup: kb });
+  };
+  bot.command("sessions", showSessions);
+  bot.callbackQuery("fleet_st:sessions", async (ctx) => {
+    await ctx.answerCallbackQuery();
+    await showSessions(ctx);
+  });
+
+  bot.callbackQuery(/^fleet_sess:(\d+)$/, async (ctx) => {
+    const path = st.tokens?.[ctx.match[1]];
+    const j = path ? listJournals([HARNESS_STATE_DIR, stateDir]).find((x) => x.path === path) : undefined;
+    if (!j) return void (await ctx.answerCallbackQuery({ text: "Сессия не найдена (журнал удалён?)", show_alert: true }));
+    await ctx.answerCallbackQuery();
+    const kb = new InlineKeyboard().text("🔄 Обновить", `fleet_sess:${ctx.match[1]}`);
+    await ctx.reply(sessionCard(j.path, j.task, j.label), { parse_mode: "HTML", reply_markup: kb });
+  });
+
+  // --- "Зам. CTO": a standing conversation with pm in one permanent thread.
+  const deputyOn = async (ctx: Context) => {
+    st.deputyMode = true;
+    saveState(st);
     await ctx.reply(
-      [
-        "Флот ролей",
-        limits.summary(),
-        "",
-        running.length ? running.join("\n") : "Сейчас никто не работает.",
-        queue.length ? queue.join("\n") : "Очереди пусты.",
-        holds.length ? `⛔ Остановлены треды: ${holds.join(", ")}` : "",
-        "",
-        "/fleet_pause [роль] · /fleet_resume [роль] · /fleet_override",
-      ].filter((x, i, a) => x !== "" || a[i - 1] !== "").join("\n"),
+      "🧑‍💼 Режим «Зам. CTO»: пиши как человеку — сообщения уходят pm в постоянный тред, он помнит прошлые разговоры и видит весь флот. Ответ придёт сюда.",
+      { reply_markup: new InlineKeyboard().text("Выйти из режима", "fleet_dep:off") },
     );
+  };
+  bot.hears(MENU.deputy, deputyOn);
+  bot.command("deputy", deputyOn);
+  bot.callbackQuery("fleet_dep:on", async (ctx) => {
+    await ctx.answerCallbackQuery();
+    await deputyOn(ctx);
+  });
+  bot.callbackQuery("fleet_dep:off", async (ctx) => {
+    st.deputyMode = false;
+    saveState(st);
+    await ctx.answerCallbackQuery({ text: "Режим выключен" });
+    await ctx.editMessageReplyMarkup({ reply_markup: undefined }).catch(() => {});
+    await ctx.reply("Вышла из режима «Зам. CTO». Свободный текст снова идёт обычному боту.");
   });
 
   bot.command("fleet_metrics", async (ctx) => {
@@ -329,7 +450,17 @@ export function installOwnerBridge(
     const replyTo = ctx.message?.reply_to_message?.message_id;
     const fwd = replyTo !== undefined ? st.forwarded[String(replyTo)] : undefined;
     const text = ctx.message?.text?.trim() ?? "";
-    if (!fwd || !text || text.startsWith("/")) return next();
+    if (!text || text.startsWith("/") || MENU_LABELS.includes(text)) return next();
+    if (!fwd && st.deputyMode) {
+      try {
+        send(spool, { from: OWNER_ADDRESS, to: ["xentra/pm"], subject: text.split("\n")[0].slice(0, 60), body: text, thread: DEPUTY_THREAD });
+        await ctx.react("👀").catch(() => {});
+      } catch (err) {
+        await ctx.reply(`Не отправил: ${(err as Error).message}`);
+      }
+      return;
+    }
+    if (!fwd) return next();
     try {
       const l = send(spool, {
         from: OWNER_ADDRESS,
