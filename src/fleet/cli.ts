@@ -13,6 +13,7 @@ import { getFailedJobs, getMergeRequestPipeline } from "../gitlab.js";
 import { secretValues } from "../config.js";
 import { commitWorkspace, ensureWorkspace, fleetHome, runWorkspaceGates, workspaceDiff, workspaceHead, type RepoTarget } from "./workspace.js";
 import { mergeModeFromEnv, pollMerges } from "./mergeBot.js";
+import { computeMetrics, formatMetrics } from "./metrics.js";
 import { mergeMergeRequest } from "../gitlab.js";
 
 // `fleet …` commands: the supervisor (`run`, `once`), the owner's mailbox from the
@@ -193,6 +194,15 @@ export function registerFleetCommands(program: Command): void {
   hold.command("release <thread>").action((t: string) => {
     console.log(releaseHold(new Spool(), t) ? `released ${t}` : `${t} was not on hold`);
   });
+
+  fleet
+    .command("metrics")
+    .description("Fleet metrics: time to MR, returns, owner attention, cost by role and model")
+    .option("--days <n>", "window in days", "7")
+    .action((o) => {
+      const since = Date.now() - Number(o.days) * 86_400_000;
+      console.log(formatMetrics(computeMetrics(new Spool(), join(fleetHome(), "state"), loadRoles(), since)));
+    });
 
   fleet
     .command("roles")

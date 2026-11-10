@@ -12,6 +12,7 @@ import { branchFor } from "./workspace.js";
 import { fileRequest, loadPush } from "./pushRequests.js";
 import { WATCHER_ADDRESSES, addCiWatch } from "./watchers.js";
 import { recordVerdict } from "./mergeBot.js";
+import { appendFileSync } from "node:fs";
 import type { RepoTarget } from "./workspace.js";
 
 // One supervisor process for the whole fleet (the CTO fleet runs one runner per role
@@ -198,10 +199,31 @@ export class Supervisor {
     const keys = [...new Set(letters.map((l) => l.key).filter((k): k is string => !!k))];
     const memory = memoryPromptBlock(this.o.stateDir, batch.thread, keys);
     let outcome;
+    const t0 = Date.now();
     try {
       outcome = await this.o.runSession({ role, batch, cwd, stateDir: this.o.stateDir, history, memory });
     } finally {
       rmSync(runningFile, { force: true });
+    }
+    // Session ledger for metrics (fleet/metrics.ts): one JSON line per session.
+    try {
+      appendFileSync(
+        join(this.o.stateDir, "sessions.jsonl"),
+        JSON.stringify({
+          at: new Date(t0).toISOString(),
+          role: role.role,
+          engine: role.engine,
+          model: role.model,
+          thread: batch.thread,
+          letters: letters.length,
+          durationMs: Date.now() - t0,
+          costUsd: outcome.costUsd,
+          ok: outcome.ok,
+          error: outcome.error,
+        }) + "\n",
+      );
+    } catch {
+      /* metrics are best-effort */
     }
     this.o.limits?.record(role.engine, outcome.costUsd);
 

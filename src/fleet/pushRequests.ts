@@ -20,6 +20,8 @@ export interface PushRequest {
   status: "pending" | "pushed" | "declined" | "failed";
   mr?: { iid: number; webUrl: string };
   error?: string;
+  decidedAt?: string; // when the owner pushed or declined
+  firstPushedAt?: string; // first successful push of the thread — "time to MR"
 }
 
 const SAFE = (t: string) => t.replace(/[^A-Za-z0-9_-]/g, "_");
@@ -52,7 +54,7 @@ export function listPushes(stateDir: string): PushRequest[] {
 // A new request keeps the thread's MR (a second push updates the same MR).
 export function fileRequest(stateDir: string, req: Omit<PushRequest, "status" | "requestedAt" | "mr" | "error">, now = new Date()): PushRequest {
   const prev = loadPush(stateDir, req.thread);
-  const r: PushRequest = { ...req, status: "pending", requestedAt: now.toISOString(), mr: prev?.mr };
+  const r: PushRequest = { ...req, status: "pending", requestedAt: now.toISOString(), mr: prev?.mr, firstPushedAt: prev?.firstPushedAt };
   savePush(stateDir, r);
   return r;
 }
@@ -71,10 +73,12 @@ export async function approvePush(stateDir: string, thread: string, deps: PushDe
     if (!r.mr) r.mr = await deps.createMr(r);
     r.status = "pushed";
     r.error = undefined;
+    r.firstPushedAt ??= new Date().toISOString();
   } catch (err) {
     r.status = "failed";
     r.error = (err as Error).message.slice(0, 300);
   }
+  r.decidedAt = new Date().toISOString();
   savePush(stateDir, r);
   return r;
 }
@@ -83,6 +87,7 @@ export function declinePush(stateDir: string, thread: string): PushRequest | und
   const r = loadPush(stateDir, thread);
   if (!r || r.status !== "pending") return r;
   r.status = "declined";
+  r.decidedAt = new Date().toISOString();
   savePush(stateDir, r);
   return r;
 }

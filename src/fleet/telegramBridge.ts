@@ -8,6 +8,7 @@ import { FLEET_ADDRESS } from "./supervisor.js";
 import { fleetHome } from "./workspace.js";
 import { FleetLimits } from "./limits.js";
 import { WATCHER_ADDRESSES } from "./watchers.js";
+import { computeMetrics, formatMetrics } from "./metrics.js";
 import { approvePush, declinePush, loadPush, type PushDeps } from "./pushRequests.js";
 import { createMergeRequest, getMergeRequestPipeline, mergeMergeRequest, pushBranch } from "../gitlab.js";
 import { checkReadiness, setVeto, type MergeDeps } from "./mergeBot.js";
@@ -282,6 +283,13 @@ export function installOwnerBridge(
         "/fleet_pause [роль] · /fleet_resume [роль] · /fleet_override",
       ].filter((x, i, a) => x !== "" || a[i - 1] !== "").join("\n"),
     );
+  });
+
+  bot.command("fleet_metrics", async (ctx) => {
+    const days = Number(ctx.match?.toString().trim() || 7);
+    const since = Date.now() - (Number.isFinite(days) && days > 0 ? days : 7) * 86_400_000;
+    const text = formatMetrics(computeMetrics(spool, stateDir, loadRoles(), since));
+    await ctx.reply(text.length > 3900 ? `${text.slice(0, 3900)}…` : text);
   });
 
   bot.command("fleet_pause", async (ctx) => {
