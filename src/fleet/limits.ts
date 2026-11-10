@@ -43,6 +43,10 @@ export class FleetLimits {
     private readonly limits: DailyLimits = limitsFromEnv(),
   ) {}
 
+  caps(): DailyLimits {
+    return { ...this.limits };
+  }
+
   private ledgerPath(now = new Date()): string {
     return join(this.stateDir, "ledger", `${today(now)}.json`);
   }

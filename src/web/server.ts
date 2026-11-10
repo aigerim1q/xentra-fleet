@@ -4,6 +4,7 @@ import { getLiveState } from "../bot/liveState.js";
 import { loadState, totalCostUsd, costSince, startOfTodayIso } from "../bot/state.js";
 import { listCandidates, proposeIssueByKey, type Proposal } from "../queue.js";
 import { DASHBOARD_PAGE } from "./page.js";
+import { handleConsole } from "./console/routes.js";
 
 let server: Server | null = null;
 let ticketsCache: { at: number; data: unknown } | null = null;
@@ -50,6 +51,8 @@ export function startDashboardServer(port: number, onProposal?: (proposal: Propo
       res.writeHead(403).end();
       return;
     }
+    if (handleConsole(req, res, { token: dashboardToken, hasValidToken: (r) => hasValidToken(r) })) return;
+
     if (req.url === "/api/state") {
       const persisted = loadState();
       sendJson(res, 200, {
@@ -106,4 +109,8 @@ export function startDashboardServer(port: number, onProposal?: (proposal: Propo
 
 export function dashboardUrl(port: number): string {
   return `http://${LOOPBACK}:${port}/`;
+}
+
+export function consoleUrl(port: number): string {
+  return `http://${LOOPBACK}:${port}/console`;
 }

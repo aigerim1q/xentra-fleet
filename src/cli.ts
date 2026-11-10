@@ -145,9 +145,10 @@ program
   .description("Start only the dashboard web server (for testing without Telegram)")
   .action(async () => {
     const { config } = await import("./config.js");
-    const { startDashboardServer, dashboardUrl } = await import("./web/server.js");
+    const { startDashboardServer, dashboardUrl, consoleUrl } = await import("./web/server.js");
     startDashboardServer(config.dashboard.port);
-    console.log(`[dashboard] ${dashboardUrl(config.dashboard.port)}`);
+    console.log(`[dashboard] консоль флота: ${consoleUrl(config.dashboard.port)}`);
+    console.log(`[dashboard] дашборд конвейера: ${dashboardUrl(config.dashboard.port)}`);
   });
 
 program

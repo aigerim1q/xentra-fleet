@@ -25,7 +25,7 @@ import {
 } from "./state.js";
 import { setBotRunning, getLiveState, loadPersistedPending } from "./liveState.js";
 import { recoverOrphanedCheckpoints } from "../engine/checkpoint.js";
-import { startDashboardServer, dashboardUrl } from "../web/server.js";
+import { startDashboardServer, dashboardUrl, consoleUrl } from "../web/server.js";
 import {
   peekNext,
   retryIssue,
@@ -790,7 +790,9 @@ export async function startBot(): Promise<void> {
   bot.command("dashboard", async (ctx) => {
     // Telegram rejects localhost in inline-button URLs ("Wrong HTTP URL") since its
     // servers can't resolve it — plain text is the only option for a local dashboard.
-    await ctx.reply(`Живой статус процессов и задач: ${dashboardUrl(config.dashboard.port)}`);
+    await ctx.reply(
+      `Консоль флота (на этом Mac): ${consoleUrl(config.dashboard.port)}\nСтарый дашборд конвейера: ${dashboardUrl(config.dashboard.port)}`,
+    );
   });
 
   async function handleStatus(ctx: Context): Promise<void> {
