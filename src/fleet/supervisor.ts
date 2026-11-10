@@ -7,6 +7,8 @@ import { OWNER_ADDRESS, senderAllowed, type Role } from "./roles.js";
 import type { SessionRunner } from "./session.js";
 import type { FleetLimits } from "./limits.js";
 import { appendMemory, memoryPromptBlock } from "./memory.js";
+import { branchFor } from "./workspace.js";
+import { fileRequest } from "./pushRequests.js";
 import type { RepoTarget } from "./workspace.js";
 
 // One supervisor process for the whole fleet (the CTO fleet runs one runner per role
@@ -26,6 +28,7 @@ export interface WorkspaceOps {
   ensure(repo: RepoTarget, thread: string, opts: { baselines: boolean }): Promise<string>;
   commit(dir: string, message: string): Promise<boolean>;
   gates(repo: RepoTarget, dir: string): Promise<{ passed: boolean; output: string; gates: Array<{ name: string; passed: boolean }> }>;
+  diffStat(dir: string, baseBranch: string): Promise<string>;
 }
 
 export interface SupervisorOptions {
@@ -238,6 +241,45 @@ export class Supervisor {
       });
     }
 
+    if (outcome.actions.push) {
+      if (!role.canRequestPush) {
+        problems.push("push может запросить только роль с правом canRequestPush (pm) — напиши pm");
+      } else if (!repo.gitlabProjectPath) {
+        problems.push(`для репозитория ${repo.kind} не настроен проект GitLab`);
+      } else {
+        const stat = await this.o.workspace.diffStat(cwd, repo.baseBranch);
+        if (!stat) {
+          problems.push("в ветке треда нет изменений относительно базы — пушить нечего");
+        } else {
+          const req = fileRequest(this.o.stateDir, {
+            thread: batch.thread,
+            repo: repo.kind,
+            dir: cwd,
+            branch: branchFor(batch.thread),
+            baseBranch: repo.baseBranch,
+            gitlabProjectPath: repo.gitlabProjectPath,
+            title: outcome.actions.push.title,
+            requestedBy: role.mail,
+          });
+          send(spool, {
+            from: FLEET_ADDRESS,
+            to: [OWNER_ADDRESS],
+            subject: `Запрос на push: ${req.title}`,
+            body: [
+              `${role.mail} просит запушить ветку \`${req.branch}\` (${repo.kind} → ${repo.baseBranch})${req.mr ? ` — обновит MR !${req.mr.iid}` : " и открыть MR"}.`,
+              "",
+              "```",
+              stat.slice(0, 2500),
+              "```",
+            ].join("\n"),
+            priority: "high",
+            thread: batch.thread,
+            repo: batch.repo,
+          });
+        }
+      }
+    }
+
     if (problems.length > 0) {
       send(spool, {
         from: FLEET_ADDRESS,
@@ -273,7 +315,9 @@ export class Supervisor {
 
   private guardThread(thread: string): void {
     const { spool } = this.o;
-    const letters = recentRoleLetters(spool, this.o.roles.map((r) => r.mail), thread);
+    // The supervisor's own letters count too: a role that repeats the same mistake gets a
+    // problem letter each time, which wakes it again — a role<->supervisor loop.
+    const letters = recentRoleLetters(spool, [...this.o.roles.map((r) => r.mail), FLEET_ADDRESS], thread);
     if (!shouldHold(letters)) return;
     if (!placeHold(spool, thread)) return;
     this.log(`thread ${thread} put on hold: ${letters.length} role letters in 30 min`);
@@ -281,7 +325,7 @@ export class Supervisor {
       from: FLEET_ADDRESS,
       to: [OWNER_ADDRESS],
       subject: `Тред ${thread} остановлен: похоже на зацикливание`,
-      body: `Роли отправили ${letters.length} писем в треде за 30 минут. Новые письма ролей в этом треде откладываются в карантин. Снять остановку — /release ${thread} в Telegram или \`fleet hold release ${thread}\`.`,
+      body: `Роли и супервизор отправили ${letters.length} писем в треде за 30 минут. Новые письма ролей в этом треде откладываются в карантин. Снять остановку — /release ${thread} в Telegram или \`fleet hold release ${thread}\`.`,
       priority: "high",
       thread,
     });

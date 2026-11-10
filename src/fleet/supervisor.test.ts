@@ -30,6 +30,7 @@ const ws = (calls: string[] = []): WorkspaceOps => ({
     calls.push("gates");
     return { passed: false, output: "1 failing", gates: [{ name: "test", passed: false }] };
   },
+  diffStat: async () => " src/a.ts | 2 +-\n 1 file changed",
 });
 
 const repos = { backend: { kind: "backend" as const, path: "/repo", baseBranch: "dev", gates: [] }, frontend: undefined };

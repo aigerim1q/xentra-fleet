@@ -7,6 +7,9 @@ import { OWNER_ADDRESS, loadRoles } from "./roles.js";
 import { FLEET_ADDRESS } from "./supervisor.js";
 import { fleetHome } from "./workspace.js";
 import { FleetLimits } from "./limits.js";
+import { approvePush, declinePush, loadPush, type PushDeps } from "./pushRequests.js";
+import { createMergeRequest, pushBranch } from "../gitlab.js";
+import { config } from "../config.js";
 import { existsSync, readdirSync } from "node:fs";
 
 // The owner is a mailbox (xentra/owner) the fleet writes to; this bridge makes that
@@ -30,7 +33,26 @@ interface Forwarded {
 interface BridgeState {
   forwarded: Record<string, Forwarded>; // telegram message id -> letter
   seen: string[]; // letter ids already forwarded
+  // Short tokens for button data (Telegram caps it at 64 bytes; thread ids are longer).
+  tokens?: Record<string, string>;
+  nextToken?: number;
 }
+
+export const realPushDeps: PushDeps = {
+  push: (dir, branch) => pushBranch(dir, branch),
+  createMr: async (r) => {
+    const { webUrl } = await createMergeRequest({
+      gitlabBaseUrl: config.gitlab.baseUrl,
+      token: config.gitlab.token,
+      projectPath: r.gitlabProjectPath,
+      sourceBranch: r.branch,
+      targetBranch: r.baseBranch,
+      title: r.title,
+      description: `Ветка треда флота ${r.thread}, запрос ${r.requestedBy}, одобрено владельцем.`,
+    });
+    return { iid: Number(/merge_requests\/(\d+)/.exec(webUrl)?.[1] ?? 0), webUrl };
+  },
+};
 
 const MAX_TG = 3800;
 
@@ -77,14 +99,27 @@ function spoolWithMailboxes(): Spool {
   return spool;
 }
 
-export function installOwnerBridge(bot: Bot, chatId: number, opts: { pollMs?: number } = {}): () => void {
+export function installOwnerBridge(bot: Bot, chatId: number, opts: { pollMs?: number; pushDeps?: PushDeps } = {}): () => void {
   const spool = spoolWithMailboxes();
   const st = loadState();
+  const stateDir = join(fleetHome(), "state");
+  const tokenFor = (thread: string): string => {
+    st.tokens ??= {};
+    st.nextToken ??= 1;
+    const t = String(st.nextToken++);
+    st.tokens[t] = thread;
+    return t;
+  };
 
   async function forwardNew(): Promise<void> {
     for (const l of readInbox(spool, OWNER_ADDRESS)) {
       if (l.kind || st.seen.includes(l.id)) continue;
-      const kb = new InlineKeyboard().text("✅ Прочитано", `fleet_read:${l.id}`);
+      const kb = new InlineKeyboard();
+      if (l.from === FLEET_ADDRESS && l.subject.startsWith("Запрос на push") && loadPush(stateDir, l.thread)?.status === "pending") {
+        const t = tokenFor(l.thread);
+        kb.text("🚀 Push и MR", `fleet_push:${t}`).text("✋ Не сейчас", `fleet_nopush:${t}`).row();
+      }
+      kb.text("✅ Прочитано", `fleet_read:${l.id}`);
       try {
         const msg = await bot.api.sendMessage(chatId, formatForTelegram(l), { reply_markup: kb });
         st.forwarded[String(msg.message_id)] = { letterId: l.id, thread: l.thread, from: l.from, repo: l.repo, subject: l.subject };
@@ -105,6 +140,41 @@ export function installOwnerBridge(bot: Bot, chatId: number, opts: { pollMs?: nu
     archive(spool, OWNER_ADDRESS, id);
     await ctx.answerCallbackQuery({ text: "Убрал в архив" });
     await ctx.editMessageReplyMarkup({ reply_markup: undefined }).catch(() => {});
+  });
+
+  const notifyRequester = (thread: string, requestedBy: string, subject: string, body: string) => {
+    try {
+      send(spool, { from: FLEET_ADDRESS, to: [requestedBy], subject, body, thread });
+    } catch (err) {
+      console.error("[fleet-bridge] notify requester failed:", (err as Error).message);
+    }
+  };
+
+  bot.callbackQuery(/^fleet_push:(\d+)$/, async (ctx) => {
+    const thread = st.tokens?.[ctx.match[1]];
+    if (!thread) return void (await ctx.answerCallbackQuery({ text: "Запрос устарел", show_alert: true }));
+    await ctx.answerCallbackQuery({ text: "Пушу…" });
+    await ctx.editMessageReplyMarkup({ reply_markup: undefined }).catch(() => {});
+    try {
+      const r = await approvePush(stateDir, thread, opts.pushDeps ?? realPushDeps);
+      if (r.status === "pushed") {
+        await ctx.reply(`🚀 Запушено: ${r.branch}${r.mr ? `\nMR: ${r.mr.webUrl}` : ""}`);
+        notifyRequester(thread, r.requestedBy, "Push выполнен", `Владелец одобрил. Ветка \`${r.branch}\` запушена.${r.mr ? ` MR: ${r.mr.webUrl}` : ""}`);
+      } else {
+        await ctx.reply(`❌ Push не удался: ${r.error}`);
+        notifyRequester(thread, r.requestedBy, "Push не удался", `Владелец одобрил, но push/MR упал: ${r.error}`);
+      }
+    } catch (err) {
+      await ctx.reply(`Не выполнено: ${(err as Error).message}`);
+    }
+  });
+
+  bot.callbackQuery(/^fleet_nopush:(\d+)$/, async (ctx) => {
+    const thread = st.tokens?.[ctx.match[1]];
+    const r = thread ? declinePush(stateDir, thread) : undefined;
+    await ctx.answerCallbackQuery({ text: r ? "Отклонено" : "Запрос устарел" });
+    await ctx.editMessageReplyMarkup({ reply_markup: undefined }).catch(() => {});
+    if (r?.status === "declined") notifyRequester(r.thread, r.requestedBy, "Push отклонён", "Владелец не одобрил push. Если нужно — спроси у него, что изменить.");
   });
 
   bot.command("fleet", async (ctx) => {

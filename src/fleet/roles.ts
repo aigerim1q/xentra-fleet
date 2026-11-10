@@ -21,6 +21,8 @@ export interface Role {
   // Empty = anyone may write; otherwise only these senders (others are refused, the
   // sender is told once, the letter archived).
   acceptFrom: string[];
+  // May ask the owner to push the thread branch and open an MR (<push/>).
+  canRequestPush: boolean;
   description: string;
   instructions: string;
 }
@@ -62,6 +64,7 @@ export function parseRole(raw: unknown, instructions: string): Role {
     sessionTimeoutMs: parseDuration(typeof r.sessionTimeout === "string" ? r.sessionTimeout : "5h"),
     defaultRepo,
     acceptFrom,
+    canRequestPush: r.canRequestPush === true,
     description: typeof r.description === "string" ? r.description : "",
     instructions,
   };

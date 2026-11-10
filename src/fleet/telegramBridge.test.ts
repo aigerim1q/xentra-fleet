@@ -96,3 +96,48 @@ test("forwards owner mail to the chat, and a reply goes back into the thread", a
     stop();
   }
 });
+
+test("a push request shows Push/Decline buttons, and Push runs the push and tells the requester", async () => {
+  const { fileRequest, loadPush } = await import("./pushRequests.js");
+  const markups: unknown[] = [];
+  let nextId = 500;
+  const bot = new Bot("1:fake", { botInfo: { id: 1, is_bot: true, first_name: "b", username: "b", can_join_groups: false, can_read_all_group_messages: false, supports_inline_queries: false, can_connect_to_business: false, has_main_web_app: false } as never });
+  bot.api.config.use(async (_prev, method, payload) => {
+    if (method === "sendMessage") {
+      markups.push((payload as { reply_markup?: unknown }).reply_markup);
+      return { ok: true, result: { message_id: nextId++, date: 0, chat: { id: 7, type: "private" } } } as never;
+    }
+    return { ok: true, result: true } as never;
+  });
+  const spool = new Spool();
+  spool.register(OWNER_ADDRESS);
+  spool.register(FLEET_ADDRESS);
+  spool.register("xentra/pm");
+  const stateDir = join(home, "state");
+  fileRequest(stateDir, { thread: "tp", repo: "backend", dir: "/wt", branch: "fleet/tp", baseBranch: "dev", gitlabProjectPath: "saqr/back-ai", title: "XEN-9", requestedBy: "xentra/pm" });
+  send(spool, { from: FLEET_ADDRESS, to: [OWNER_ADDRESS], subject: "Запрос на push: XEN-9", body: "stat", thread: "tp" });
+
+  const pushed: string[] = [];
+  const stop = installOwnerBridge(bot, 7, {
+    pollMs: 60_000,
+    pushDeps: { push: async (_d, b) => void pushed.push(b), createMr: async () => ({ iid: 3, webUrl: "https://g/mr/3" }) },
+  });
+  try {
+    await new Promise((r) => setTimeout(r, 50));
+    const kb = JSON.stringify(markups.at(-1));
+    const token = /fleet_push:(\d+)/.exec(kb)?.[1];
+    assert.ok(token, `push button expected in ${kb}`);
+    assert.match(kb, /fleet_nopush/);
+    await bot.handleUpdate({
+      update_id: nextId++,
+      callback_query: { id: "q1", chat_instance: "c", from: { id: 7, is_bot: false, first_name: "o" }, data: `fleet_push:${token}`,
+        message: { message_id: 1, date: 0, chat: { id: 7, type: "private", first_name: "o" } } },
+    } as never);
+    assert.deepEqual(pushed, ["fleet/tp"]);
+    assert.equal(loadPush(stateDir, "tp")!.status, "pushed");
+    const note = readInbox(spool, "xentra/pm").find((l) => l.subject === "Push выполнен");
+    assert.match(note!.body, /mr\/3/);
+  } finally {
+    stop();
+  }
+});

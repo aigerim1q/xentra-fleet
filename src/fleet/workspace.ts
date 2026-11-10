@@ -20,6 +20,7 @@ export interface RepoTarget {
   path: string;
   baseBranch: string;
   gates: GateSpec[];
+  gitlabProjectPath?: string;
 }
 
 interface WorkspaceMeta {

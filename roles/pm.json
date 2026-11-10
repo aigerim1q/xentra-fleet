@@ -7,5 +7,6 @@
   "sessionTimeout": "40m",
   "description": "Планирует: разбирает задачу владельца, ставит её разработчику, собирает итог и докладывает владельцу.",
   "defaultRepo": "backend",
-  "acceptFrom": []
+  "acceptFrom": [],
+  "canRequestPush": true
 }
