@@ -177,7 +177,10 @@ export function send(spool: Spool, input: SendInput, now = new Date()): Letter {
   if (input.repo && !/^[a-z0-9-]+$/.test(input.repo)) throw new Error(`bad repo: ${input.repo}`);
   if (input.key && !/^[A-Z][A-Z0-9]+-[0-9]+$/.test(input.key)) throw new Error(`bad key: ${input.key}`);
 
-  const id = uniqueId(spool, input.from, `${Math.floor(now.getTime() / 1000)}-${slugify(input.subject)}`);
+  // Sender in the id: two senders writing the same subject in the same second must not
+  // collide in a shared recipient's Inbox (the same-sender case is caught via Sent).
+  const sender = input.from.split("/")[1];
+  const id = uniqueId(spool, input.from, `${Math.floor(now.getTime() / 1000)}-${sender}-${slugify(input.subject)}`);
   const letter: Letter = {
     id,
     from: input.from,

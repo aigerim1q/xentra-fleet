@@ -54,9 +54,10 @@ export function buildCodexArgs(opts: {
   model: string;
   effort: string;
   cwd: string;
-  schemaPath: string;
+  schemaPath?: string;
   outputPath: string;
 }): string[] {
+  const schema = opts.schemaPath ? ["--output-schema", opts.schemaPath] : [];
   return [
     "exec",
     "--sandbox",
@@ -70,8 +71,7 @@ export function buildCodexArgs(opts: {
     "mcp_servers={}",
     "-C",
     opts.cwd,
-    "--output-schema",
-    opts.schemaPath,
+    ...schema,
     "-o",
     opts.outputPath,
     "-",
@@ -149,35 +149,53 @@ function runCodex(args: string[], prompt: string, timeoutMs: number): Promise<{ 
   });
 }
 
-export async function reviewWithCodex(worktreeDir: string, task: TaskSpec, opts: CodexReviewOptions): Promise<ReviewOutcome> {
-  const diffText = await getWorktreeDiff(worktreeDir, opts.baseBranch).catch(() => "");
-  const dir = mkdtempSync(join(tmpdir(), "codex-review-"));
+// General one-shot Codex run (read-only sandbox, no MCP, tokens stripped from env):
+// returns the final message, or why there is none. Used by the reviewer below and by
+// the fleet's codex roles.
+export async function runCodexExec(opts: {
+  cwd: string;
+  prompt: string;
+  model: string;
+  effort: string;
+  timeoutMs: number;
+  schema?: object;
+}): Promise<{ text: string } | { error: string }> {
+  const dir = mkdtempSync(join(tmpdir(), "codex-run-"));
   try {
-    const schemaPath = join(dir, "schema.json");
-    const outputPath = join(dir, "last-message.json");
-    writeFileSync(schemaPath, JSON.stringify(CODEX_REVIEW_SCHEMA));
-    const args = buildCodexArgs({ model: opts.model, effort: opts.effort, cwd: worktreeDir, schemaPath, outputPath });
-    const run = await runCodex(args, buildCodexReviewPrompt(task, diffText), opts.timeoutMs);
-
-    const fail = (why: string): ReviewOutcome => ({
-      findings: [],
-      costUsd: 0,
-      reason: `Codex: ${scrubSecrets(why, secretValues()).slice(0, 200)}`,
-    });
-    if (run.timedOut) return fail(`не уложился в ${Math.round(opts.timeoutMs / 60000)} мин`);
-    if (run.code !== 0) return fail(`код выхода ${run.code}: ${run.stderr.trim().split("\n").slice(-3).join(" ")}`);
-
-    let raw: string;
-    try {
-      raw = readFileSync(outputPath, "utf8");
-    } catch {
-      return fail("нет итогового ответа");
+    const outputPath = join(dir, "last-message.txt");
+    let schemaPath: string | undefined;
+    if (opts.schema) {
+      schemaPath = join(dir, "schema.json");
+      writeFileSync(schemaPath, JSON.stringify(opts.schema));
     }
-    const findings = parseCodexReview(scrubSecrets(raw, secretValues()));
-    if (!findings) return fail("ответ не по схеме");
-    // Billed to the ChatGPT subscription, not per token — nothing to add to the task cost.
-    return { findings, costUsd: 0 };
+    const args = buildCodexArgs({ model: opts.model, effort: opts.effort, cwd: opts.cwd, schemaPath, outputPath });
+    const run = await runCodex(args, opts.prompt, opts.timeoutMs);
+    const why = (s: string) => ({ error: scrubSecrets(s, secretValues()).slice(0, 200) });
+    if (run.timedOut) return why(`не уложился в ${Math.round(opts.timeoutMs / 60000)} мин`);
+    if (run.code !== 0) return why(`код выхода ${run.code}: ${run.stderr.trim().split("\n").slice(-3).join(" ")}`);
+    try {
+      return { text: scrubSecrets(readFileSync(outputPath, "utf8"), secretValues()) };
+    } catch {
+      return why("нет итогового ответа");
+    }
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+}
+
+export async function reviewWithCodex(worktreeDir: string, task: TaskSpec, opts: CodexReviewOptions): Promise<ReviewOutcome> {
+  const diffText = await getWorktreeDiff(worktreeDir, opts.baseBranch).catch(() => "");
+  const run = await runCodexExec({
+    cwd: worktreeDir,
+    prompt: buildCodexReviewPrompt(task, diffText),
+    model: opts.model,
+    effort: opts.effort,
+    timeoutMs: opts.timeoutMs,
+    schema: CODEX_REVIEW_SCHEMA,
+  });
+  if ("error" in run) return { findings: [], costUsd: 0, reason: `Codex: ${run.error}` };
+  const findings = parseCodexReview(run.text);
+  if (!findings) return { findings: [], costUsd: 0, reason: "Codex: ответ не по схеме" };
+  // Billed to the ChatGPT subscription, not per token — nothing to add to the task cost.
+  return { findings, costUsd: 0 };
 }

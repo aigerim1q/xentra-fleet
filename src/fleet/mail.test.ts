@@ -38,7 +38,7 @@ test("serialize/parse round-trips a letter and defaults thread to id", () => {
 
 test("send delivers to every recipient's Inbox and keeps one copy in Sent", () => {
   const l = send(spool, { from: "xentra/owner", to: ["xentra/pm", "xentra/dev-1"], subject: "Task XEN-55", body: "do it" }, now);
-  assert.match(l.id, /^\d+-task-xen-55$/);
+  assert.match(l.id, /^\d+-owner-task-xen-55$/);
   assert.equal(l.thread, l.id);
   assert.equal(readInbox(spool, "xentra/pm").length, 1);
   assert.equal(readInbox(spool, "xentra/dev-1").length, 1);
