@@ -1,0 +1,11 @@
+{
+  "role": "tester",
+  "mail": "xentra/tester",
+  "engine": "claude",
+  "model": "claude-sonnet-5-5",
+  "access": "read",
+  "sessionTimeout": "2h",
+  "description": "Тестировщик: проверяет изменения против критериев приёмки, запускает гейты через супервизор.",
+  "defaultRepo": "backend",
+  "acceptFrom": []
+}

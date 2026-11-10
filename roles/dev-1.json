@@ -1,0 +1,11 @@
+{
+  "role": "dev-1",
+  "mail": "xentra/dev-1",
+  "engine": "claude",
+  "model": "claude-sonnet-5-5",
+  "access": "edit",
+  "sessionTimeout": "5h",
+  "description": "Разработчик: реализует задачу в рабочей копии треда.",
+  "defaultRepo": "backend",
+  "acceptFrom": []
+}

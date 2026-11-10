@@ -1,0 +1,11 @@
+{
+  "role": "auditor",
+  "mail": "xentra/auditor",
+  "engine": "claude",
+  "model": "claude-opus-5-5",
+  "access": "read",
+  "sessionTimeout": "2h",
+  "description": "Аудитор: независимое ревью изменений треда.",
+  "defaultRepo": "backend",
+  "acceptFrom": []
+}

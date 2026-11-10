@@ -1,0 +1,12 @@
+{
+  "role": "auditor-codex",
+  "mail": "xentra/auditor-codex",
+  "engine": "codex",
+  "model": "gpt-6-astra",
+  "effort": "high",
+  "access": "read",
+  "sessionTimeout": "1h",
+  "description": "Второй аудитор на другом провайдере: независимое ревью изменений треда.",
+  "defaultRepo": "backend",
+  "acceptFrom": []
+}

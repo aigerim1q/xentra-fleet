@@ -1,0 +1,11 @@
+{
+  "role": "pm",
+  "mail": "xentra/pm",
+  "engine": "claude",
+  "model": "claude-opus-5-5",
+  "access": "read",
+  "sessionTimeout": "40m",
+  "description": "Планирует: разбирает задачу владельца, ставит её разработчику, собирает итог и докладывает владельцу.",
+  "defaultRepo": "backend",
+  "acceptFrom": []
+}
