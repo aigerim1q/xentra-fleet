@@ -14,7 +14,7 @@ let liveState: typeof import("../bot/liveState.js");
 let stateDir: string;
 
 before(async () => {
-  stateDir = await mkdtemp(join(tmpdir(), "jira-harness-checkpoint-test-"));
+  stateDir = await mkdtemp(join(tmpdir(), "xentra-fleet-checkpoint-test-"));
   process.env.HARNESS_STATE_DIR = stateDir;
   checkpoint = await import("./checkpoint.js");
   liveState = await import("../bot/liveState.js");

@@ -935,7 +935,7 @@ export async function startBot(): Promise<void> {
   // "chat" reply.
   async function classifyMessage(text: string): Promise<ChatIntent> {
     const prompt = [
-      "Ты — Зам. CEO внутри бота jira-harness: ты на прямой связи с CEO по работе над",
+      "Ты — Зам. CEO внутри бота xentra-fleet: ты на прямой связи с CEO по работе над",
       "тикетами из Jira. Любое его сообщение без команды попадает сюда. Если ответ требует",
       "РЕАЛЬНЫХ живых данных (расход, статус, очередь) — не выдумывай их сам, выбери",
       "соответствующий intent: бот сходит за настоящими данными и пришлёт их отдельным",

@@ -179,7 +179,7 @@ src/
   web/        локальный дашборд
 roles/        роли флота и их инструкции
 evals/cases/  кейсы eval
-docs/         FLEET.md (флот), ROADMAP.md (план и статус), PIPELINE.md (устройство конвейера)
+docs/         FLEET.md, ROADMAP.md, PIPELINE.md, KNOWN-LIMITS.md
 ```
 
 ## Документы
@@ -187,3 +187,4 @@ docs/         FLEET.md (флот), ROADMAP.md (план и статус), PIPELI
 - [`docs/FLEET.md`](docs/FLEET.md) — флот ролей: запуск, правила супервизора, управление.
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — план развития и статус фаз.
 - [`docs/PIPELINE.md`](docs/PIPELINE.md) — подробное устройство конвейера и причины решений.
+- [`docs/KNOWN-LIMITS.md`](docs/KNOWN-LIMITS.md) — известные пределы и что сознательно отложено.

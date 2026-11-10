@@ -26,7 +26,7 @@ const execFileAsync = promisify(execFile);
 // a fixed location under the system tmpdir, shared across the whole process) can never
 // collide between tests or with a real harness run.
 async function makeRepo(): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), "jira-harness-git-test-"));
+  const dir = await mkdtemp(join(tmpdir(), "xentra-fleet-git-test-"));
   await execFileAsync("git", ["init", "-q"], { cwd: dir });
   await execFileAsync("git", ["config", "user.email", "test@example.com"], { cwd: dir });
   await execFileAsync("git", ["config", "user.name", "Test"], { cwd: dir });
@@ -44,10 +44,10 @@ function uniqueBranch(): string {
 // the local clone's HEAD can legitimately go stale relative to origin once something
 // else pushes directly to it, which is the exact gap fetchFreshBase closes.
 async function makeRepoWithRemote(): Promise<{ origin: string; local: string }> {
-  const origin = await mkdtemp(join(tmpdir(), "jira-harness-git-origin-"));
+  const origin = await mkdtemp(join(tmpdir(), "xentra-fleet-git-origin-"));
   await execFileAsync("git", ["init", "-q", "--bare"], { cwd: origin });
 
-  const seed = await mkdtemp(join(tmpdir(), "jira-harness-git-seed-"));
+  const seed = await mkdtemp(join(tmpdir(), "xentra-fleet-git-seed-"));
   await execFileAsync("git", ["init", "-q"], { cwd: seed });
   await execFileAsync("git", ["config", "user.email", "test@example.com"], { cwd: seed });
   await execFileAsync("git", ["config", "user.name", "Test"], { cwd: seed });
@@ -59,7 +59,7 @@ async function makeRepoWithRemote(): Promise<{ origin: string; local: string }> 
   await execFileAsync("git", ["push", "-q", "origin", "dev"], { cwd: seed });
   await rm(seed, { recursive: true, force: true });
 
-  const local = await mkdtemp(join(tmpdir(), "jira-harness-git-local-"));
+  const local = await mkdtemp(join(tmpdir(), "xentra-fleet-git-local-"));
   await execFileAsync("git", ["clone", "-q", "-b", "dev", origin, local]);
   await execFileAsync("git", ["config", "user.email", "test@example.com"], { cwd: local });
   await execFileAsync("git", ["config", "user.name", "Test"], { cwd: local });
@@ -70,7 +70,7 @@ async function makeRepoWithRemote(): Promise<{ origin: string; local: string }> 
 // a throwaway clone pushes, rather than pushing from `local` itself, so `local`'s own
 // HEAD and refs stay exactly as stale as a real harness host's would.
 async function pushDirectlyToOrigin(origin: string, newContent: string): Promise<void> {
-  const other = await mkdtemp(join(tmpdir(), "jira-harness-git-other-"));
+  const other = await mkdtemp(join(tmpdir(), "xentra-fleet-git-other-"));
   await execFileAsync("git", ["clone", "-q", "-b", "dev", origin, other]);
   await execFileAsync("git", ["config", "user.email", "test@example.com"], { cwd: other });
   await execFileAsync("git", ["config", "user.name", "Test"], { cwd: other });

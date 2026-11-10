@@ -20,7 +20,7 @@ test("buildInitialPrompt includes task id, title, description, and numbered crit
 
 test("buildInitialPrompt includes memory context when given, and omits it when not", () => {
   const task: TaskSpec = { id: "XEN-42", title: "Fix the thing", description: "It is broken.", acceptanceCriteria: [] };
-  const withMemory = buildInitialPrompt(task, "Накопленные заметки jira-harness: сервис X отвечает 30с");
+  const withMemory = buildInitialPrompt(task, "Накопленные заметки флота: сервис X отвечает 30с");
   assert.match(withMemory, /отвечает 30с/);
 
   const withoutMemory = buildInitialPrompt(task);

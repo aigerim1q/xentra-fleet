@@ -13,12 +13,12 @@ const task: TaskSpec = {
 test("buildMemoryContextBlock omits a section entirely when that memory file doesn't exist", () => {
   const onlyHarness = buildMemoryContextBlock({ team: null, harness: "# notes\n- a fact" }, "dev");
   assert.doesNotMatch(onlyHarness, /Memory команды проекта/);
-  assert.match(onlyHarness, /Накопленные заметки jira-harness/);
+  assert.match(onlyHarness, /Накопленные заметки флота/);
   assert.match(onlyHarness, /- a fact/);
 
   const onlyTeam = buildMemoryContextBlock({ team: "# team notes", harness: null }, "dev");
   assert.match(onlyTeam, /Memory команды проекта/);
-  assert.doesNotMatch(onlyTeam, /Накопленные заметки jira-harness/);
+  assert.doesNotMatch(onlyTeam, /Накопленные заметки флота/);
 });
 
 test("buildMemoryContextBlock returns an empty string when neither file exists", () => {

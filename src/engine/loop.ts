@@ -281,7 +281,7 @@ async function runPostImplementSuccess(
           reviewRounds,
         };
       }
-      await commitAll(worktreeDir, `${task.id}: fix review round ${round}\n\nAutomated by jira-harness.`);
+      await commitAll(worktreeDir, `${task.id}: fix review round ${round}\n\nAutomated by xentra-fleet.`);
     }
   }
 
@@ -521,7 +521,7 @@ export async function runCloseLoop(task: TaskSpec, config: EngineConfig): Promis
       // checkpoint commit before anyone touches the worktree, then a human decides.
       const checkpointCommitted = await commitAll(
         worktreeDir,
-        `wip: checkpoint ${task.id} (turn stopped by ${err.kind === "idle" ? "idle watchdog" : "time ceiling"})\n\nAutomated by jira-harness.`,
+        `wip: checkpoint ${task.id} (turn stopped by ${err.kind === "idle" ? "idle watchdog" : "time ceiling"})\n\nAutomated by xentra-fleet.`,
       ).catch(() => false);
       config.onLog?.(
         `⏱ Ход остановлен: ${err.kind === "idle" ? "агент молчал" : "превышен лимит времени"} ${Math.round(err.afterMs / 60000)} мин` +
@@ -594,7 +594,7 @@ export async function runCloseLoop(task: TaskSpec, config: EngineConfig): Promis
     iterations.push({ turn, verify });
 
     if (verify.passed) {
-      await commitAll(worktreeDir, `${task.id}: ${task.title}\n\nAutomated by jira-harness.`);
+      await commitAll(worktreeDir, `${task.id}: ${task.title}\n\nAutomated by xentra-fleet.`);
       return runPostImplementSuccess(task, worktreeDir, config, {
         iterations,
         totalCostUsd,

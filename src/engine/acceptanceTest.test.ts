@@ -11,7 +11,7 @@ import type { TaskSpec } from "../types.js";
 const execFileAsync = promisify(execFile);
 
 async function makeRepo(): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), "jira-harness-acceptance-test-"));
+  const dir = await mkdtemp(join(tmpdir(), "xentra-fleet-acceptance-test-"));
   await execFileAsync("git", ["init", "-q"], { cwd: dir });
   await execFileAsync("git", ["config", "user.email", "test@example.com"], { cwd: dir });
   await execFileAsync("git", ["config", "user.name", "Test"], { cwd: dir });

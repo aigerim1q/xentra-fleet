@@ -7,6 +7,8 @@ import { symlink, access } from "node:fs/promises";
 const execFileAsync = promisify(execFile);
 
 export function worktreeDirFor(branchName: string): string {
+  // Directory name kept from the first version: worktrees and checkpoints already on
+  // disk are found by this path.
   return join(tmpdir(), "jira-harness-worktrees", branchName);
 }
 

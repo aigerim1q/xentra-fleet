@@ -239,7 +239,7 @@ async function proposeIssue(
     declinedKeys.add(issue.key); // can't route it regardless of approval; no point re-surfacing
     await jira.addComment(
       issue.key,
-      `jira-harness: could not determine a single target repository (${reason}). Skipped — left in To Do.`,
+      `xentra-fleet: could not determine a single target repository (${reason}). Skipped — left in To Do.`,
     );
     return { kind: "skipped", issueKey: issue.key, reason };
   }
@@ -248,7 +248,7 @@ async function proposeIssue(
     if (!config.repos.backend.path || !config.repos.frontend.path) {
       const reason = "cross-repo ticket but BACKEND_REPO_PATH/FRONTEND_REPO_PATH aren't both configured";
       declinedKeys.add(issue.key);
-      await jira.addComment(issue.key, `jira-harness: ${reason}. Skipped — left in To Do.`);
+      await jira.addComment(issue.key, `xentra-fleet: ${reason}. Skipped — left in To Do.`);
       return { kind: "skipped", issueKey: issue.key, reason };
     }
 
@@ -442,7 +442,7 @@ async function dispatchIssue(jira: JiraClient, issue: JiraIssue, acceptanceCrite
     const reason = "no [backend]/[frontend]/[web] prefix in title or description";
     await jira.addComment(
       issue.key,
-      `jira-harness: could not determine target repository (${reason}). Skipped — left in To Do.`,
+      `xentra-fleet: could not determine target repository (${reason}). Skipped — left in To Do.`,
     );
     return { kind: "skipped", issueKey: issue.key, reason };
   }
@@ -451,7 +451,7 @@ async function dispatchIssue(jira: JiraClient, issue: JiraIssue, acceptanceCrite
     const frontendRepo = config.repos.frontend;
     if (!backendRepo.path || !frontendRepo.path) {
       const reason = "cross-repo ticket but BACKEND_REPO_PATH/FRONTEND_REPO_PATH aren't both configured";
-      await jira.addComment(issue.key, `jira-harness: ${reason}. Left in To Do.`);
+      await jira.addComment(issue.key, `xentra-fleet: ${reason}. Left in To Do.`);
       return { kind: "skipped", issueKey: issue.key, reason };
     }
 
@@ -507,10 +507,10 @@ async function dispatchIssue(jira: JiraClient, issue: JiraIssue, acceptanceCrite
 // directly — the entire close loop (implement, review, push, open MR) with no propose
 // step and no human ever seeing a plan or cost estimate first. Exactly the gap the
 // Telegram pick:/confirm: flow exists to close, just bypassed entirely by running this
-// on a cron schedule the way HANDOFF.md itself used to recommend. Now a single
+// on a cron schedule the way the early docs used to recommend. Now a single
 // `queue` invocation only ever proposes (same as proposeNext/a Telegram pick) and
 // persists pendingApproval — still needs an actual human approval (via a running bot,
-// or the dashboard) before anything real happens. See HANDOFF.md §7/§9 for the fuller
+// or the dashboard) before anything real happens. See docs/PIPELINE.md ("Автополлинг в bot.ts") for the fuller
 // reasoning and why "bot running continuously, with its own poll loop" replaced "queue
 // on cron" as the recommended way to keep the queue moving.
 export async function runQueueOnce(): Promise<ProposeOutcome> {
@@ -674,7 +674,7 @@ async function closeLoopAndPush(
       sourceBranch: branchName,
       targetBranch: config.gitlab.targetBranch,
       title: `${issue.key}: ${issue.summary}`,
-      description: `Automated by jira-harness for ${issue.key}.\n\ncost: $${result.totalCostUsd.toFixed(4)}, iterations: ${result.iterations.length}${reviewNote}`,
+      description: `Automated by xentra-fleet for ${issue.key}.\n\ncost: $${result.totalCostUsd.toFixed(4)}, iterations: ${result.iterations.length}${reviewNote}`,
     });
     return { closeLoopResult: result, mrUrl: mr.webUrl };
   } catch (err) {
@@ -712,7 +712,7 @@ async function handleCloseLoopOutcome(
   if (outcome.briefPending) {
     await jira.addComment(
       issue.key,
-      `jira-harness: вопрос перед продолжением работы — см. Telegram.\n«${result.brief!.question}»`,
+      `xentra-fleet: вопрос перед продолжением работы — см. Telegram.\n«${result.brief!.question}»`,
     );
     setPendingBrief({
       issueKey: issue.key,
@@ -733,14 +733,14 @@ async function handleCloseLoopOutcome(
     const message =
       outcome.failureKind === "no_token"
         ? [
-            `jira-harness implemented and verified this (cost: $${result.totalCostUsd.toFixed(4)}).`,
+            `xentra-fleet implemented and verified this (cost: $${result.totalCostUsd.toFixed(4)}).`,
             `Committed locally at ${result.worktreeDir} on branch ${branchName}, but GITLAB_TOKEN is not`,
             "configured so no MR was opened. Left in-progress.",
           ].join("\n")
         : outcome.failureKind === "push"
-          ? `jira-harness verified the fix but failed to push/open an MR (${outcome.failureReason}).\nCommitted locally at ${result.worktreeDir} on branch ${branchName}. Left in-progress.`
+          ? `xentra-fleet verified the fix but failed to push/open an MR (${outcome.failureReason}).\nCommitted locally at ${result.worktreeDir} on branch ${branchName}. Left in-progress.`
           : [
-              `jira-harness did not close this task: ${outcome.failureReason}`,
+              `xentra-fleet did not close this task: ${outcome.failureReason}`,
               `cost: $${result.totalCostUsd.toFixed(4)}, iterations: ${result.iterations.length}`,
               `worktree left at: ${result.worktreeDir}`,
               "Left in-progress for a human to look at.",
@@ -777,7 +777,7 @@ async function handleCloseLoopOutcome(
   updateJob({ phase: "commenting" });
   await jira.addComment(
     issue.key,
-    `jira-harness opened ${outcome.mrUrl} (cost: $${result.totalCostUsd.toFixed(4)})${testingNotesSection(result.testingNotes)}`,
+    `xentra-fleet opened ${outcome.mrUrl} (cost: $${result.totalCostUsd.toFixed(4)})${testingNotesSection(result.testingNotes)}`,
   );
   await attachWorkReport(jira, issue, task, { closeReport: result.closeReport, testingNotes: result.testingNotes });
   await jira.transitionTo(issue.key, config.jira.reviewStatus);
@@ -917,7 +917,7 @@ async function afterBackendAttempt(
     // frontend half exactly as a first attempt would (see CrossRepoBriefContext).
     await jira.addComment(
       issue.key,
-      `jira-harness (cross-repo): вопрос от бэкенда — см. Telegram.\n«${backendResult.brief!.question}»`,
+      `xentra-fleet (cross-repo): вопрос от бэкенда — см. Telegram.\n«${backendResult.brief!.question}»`,
     );
     setPendingBrief({
       issueKey: issue.key,
@@ -944,7 +944,7 @@ async function afterBackendAttempt(
     await jira.addComment(
       issue.key,
       [
-        `jira-harness (cross-repo): backend half did not close — ${backendOutcome.failureReason}`,
+        `xentra-fleet (cross-repo): backend half did not close — ${backendOutcome.failureReason}`,
         `cost so far: $${backendResult.totalCostUsd.toFixed(4)}`,
         `backend worktree left at: ${backendResult.worktreeDir}`,
         "Frontend half was not attempted — nothing real to build against yet. Left in-progress.",
@@ -1043,7 +1043,7 @@ async function afterFrontendAttempt(
   if (frontendOutcome.briefPending) {
     await jira.addComment(
       issue.key,
-      `jira-harness (cross-repo): backend done — ${backendInfo.mrUrl}\nвопрос от фронтенда — см. Telegram.\n«${frontendResult.brief!.question}»`,
+      `xentra-fleet (cross-repo): backend done — ${backendInfo.mrUrl}\nвопрос от фронтенда — см. Telegram.\n«${frontendResult.brief!.question}»`,
     );
     setPendingBrief({
       issueKey: issue.key,
@@ -1072,7 +1072,7 @@ async function afterFrontendAttempt(
     await jira.addComment(
       issue.key,
       [
-        `jira-harness (cross-repo): backend done — ${backendInfo.mrUrl}`,
+        `xentra-fleet (cross-repo): backend done — ${backendInfo.mrUrl}`,
         `frontend half did not close — ${frontendOutcome.failureReason}`,
         `cost: $${totalCostUsd.toFixed(4)}`,
         `frontend worktree left at: ${frontendResult.worktreeDir}`,
@@ -1123,7 +1123,7 @@ async function afterFrontendAttempt(
   await jira.addComment(
     issue.key,
     [
-      "jira-harness (cross-repo) closed both halves:",
+      "xentra-fleet (cross-repo) closed both halves:",
       `backend: ${backendInfo.mrUrl}`,
       `frontend: ${frontendOutcome.mrUrl}`,
       `cost: $${totalCostUsd.toFixed(4)}`,
@@ -1163,12 +1163,12 @@ export async function resolveHumanReview(accept: boolean): Promise<{ mrUrl: stri
 
   if (!accept) {
     await cleanupWorktree(repoPath, pending.worktreeDir, pending.branchName);
-    await jira.addComment(pending.issueKey, "jira-harness: a human reviewed the pending diff and rejected it.");
+    await jira.addComment(pending.issueKey, "xentra-fleet: a human reviewed the pending diff and rejected it.");
     await jira.transitionTo(pending.issueKey, config.jira.todoStatus);
     return { rejected: true };
   }
 
-  await commitAll(pending.worktreeDir, `${pending.issueKey}: ${pending.title}\n\nAutomated by jira-harness, accepted by a human after ${pending.reason}.`);
+  await commitAll(pending.worktreeDir, `${pending.issueKey}: ${pending.title}\n\nAutomated by xentra-fleet, accepted by a human after ${pending.reason}.`);
   await pushBranch(pending.worktreeDir, pending.branchName);
   const mr = await createMergeRequest({
     gitlabBaseUrl: config.gitlab.baseUrl,
@@ -1177,9 +1177,9 @@ export async function resolveHumanReview(accept: boolean): Promise<{ mrUrl: stri
     sourceBranch: pending.branchName,
     targetBranch: config.gitlab.targetBranch,
     title: `${pending.issueKey}: ${pending.title}`,
-    description: `Automated by jira-harness for ${pending.issueKey}, accepted by a human after: ${pending.reason}.`,
+    description: `Automated by xentra-fleet for ${pending.issueKey}, accepted by a human after: ${pending.reason}.`,
   });
-  await jira.addComment(pending.issueKey, `jira-harness opened ${mr.webUrl} (accepted by a human after ${pending.reason})`);
+  await jira.addComment(pending.issueKey, `xentra-fleet opened ${mr.webUrl} (accepted by a human after ${pending.reason})`);
   await generateAndAttachWorkReport(
     jira,
     { key: pending.issueKey, summary: pending.title },

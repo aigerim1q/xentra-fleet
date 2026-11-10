@@ -38,7 +38,7 @@ function loadTask(taskArg: string): TaskSpec {
 const program = new Command();
 
 program
-  .name("jira-harness")
+  .name("xentra-fleet")
   .description("Single-task close loop: run Claude Code against a task until verification passes");
 
 program
@@ -54,7 +54,7 @@ program
     const task = loadTask(opts.task);
     const branchName = opts.branch ?? `harness/${slugify(task.id)}-${slugify(task.title)}`;
 
-    console.log(`[jira-harness] task=${task.id} branch=${branchName} repo=${opts.repo}`);
+    console.log(`[xentra-fleet] task=${task.id} branch=${branchName} repo=${opts.repo}`);
 
     const result = await runCloseLoop(task, {
       repoPath: resolve(opts.repo),
@@ -72,8 +72,8 @@ program
       if (!iter.verify.passed) console.log(iter.verify.output.slice(0, 1000));
     }
 
-    console.log(`\n[jira-harness] stopReason=${result.stopReason} success=${result.success} totalCostUsd=${result.totalCostUsd.toFixed(4)}`);
-    console.log(`[jira-harness] worktree=${result.worktreeDir} branch=${branchName}`);
+    console.log(`\n[xentra-fleet] stopReason=${result.stopReason} success=${result.success} totalCostUsd=${result.totalCostUsd.toFixed(4)}`);
+    console.log(`[xentra-fleet] worktree=${result.worktreeDir} branch=${branchName}`);
     process.exit(result.success ? 0 : 1);
   });
 
@@ -82,7 +82,7 @@ program
   .description(
     "Propose (not run) the next assigned ticket from Jira — requires a running `bot` (or the dashboard) " +
       "to actually approve it; no longer a safe thing to put on cron by itself. Prefer leaving `bot` running " +
-      "continuously, which polls on its own — see HANDOFF.md.",
+      "continuously, which polls on its own — see docs/PIPELINE.md.",
   )
   .action(async () => {
     try {

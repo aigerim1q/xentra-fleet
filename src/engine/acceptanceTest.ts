@@ -127,7 +127,7 @@ export async function writeAcceptanceTest(
   await execFileAsync("git", ["add", relPath], { cwd: worktreeDir });
   await execFileAsync(
     "git",
-    ["commit", "-m", `${task.id}: acceptance test (frozen — implement cannot modify it)\n\nAutomated by jira-harness.`],
+    ["commit", "-m", `${task.id}: acceptance test (frozen — implement cannot modify it)\n\nAutomated by xentra-fleet.`],
     { cwd: worktreeDir },
   );
 

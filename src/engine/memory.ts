@@ -23,6 +23,7 @@ const TEAM_MEMORY_PATH = ".claude/memory/MEMORY.md";
 // rewriting a team's actively-curated file (front-ai's has its own ≤30-line-index
 // convention and real "не трогать" warnings — not something a bot should touch).
 export function harnessMemoryPath(role: AgentRole): string {
+  // Path kept from the first version: notes already written into the repos live here.
   return `.claude/memory/jira-harness/${role}.md`;
 }
 
@@ -50,7 +51,7 @@ export function buildMemoryContextBlock(memories: { team: string | null; harness
   if (memories.harness) {
     sections.push(
       [
-        `Накопленные заметки jira-harness (роль: ${role}) по прошлым задачам этого проекта:`,
+        `Накопленные заметки флота (роль: ${role}) по прошлым задачам этого проекта:`,
         "```markdown",
         memories.harness.trim(),
         "```",
@@ -73,7 +74,7 @@ export function buildMemoryUpdatePrompt(task: TaskSpec, existingHarnessMemory: s
     diffText.slice(0, 6000),
     "```",
     "",
-    "Текущий файл заметок jira-harness по этому проекту:",
+    "Текущий файл заметок флота по этому проекту:",
     "```markdown",
     existingHarnessMemory?.trim() || "(файла ещё нет)",
     "```",
@@ -134,7 +135,7 @@ export async function updateProjectMemory(
   await execFileAsync("git", ["add", relPath], { cwd: worktreeDir });
   await execFileAsync(
     "git",
-    ["commit", "-m", `${task.id}: update jira-harness project memory (${opts.role})\n\nAutomated by jira-harness.`],
+    ["commit", "-m", `${task.id}: update fleet project memory (${opts.role})\n\nAutomated by xentra-fleet.`],
     { cwd: worktreeDir },
   );
 

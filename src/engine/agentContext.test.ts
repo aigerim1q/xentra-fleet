@@ -11,7 +11,7 @@ let agentContext: typeof import("./agentContext.js");
 let stateDir: string;
 
 before(async () => {
-  stateDir = await mkdtemp(join(tmpdir(), "jira-harness-agent-context-test-"));
+  stateDir = await mkdtemp(join(tmpdir(), "xentra-fleet-agent-context-test-"));
   process.env.HARNESS_STATE_DIR = stateDir;
   agentContext = await import("./agentContext.js");
 });
