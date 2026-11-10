@@ -150,6 +150,68 @@ program
     console.log(`[dashboard] ${dashboardUrl(config.dashboard.port)}`);
   });
 
+program
+  .command("eval-harvest")
+  .description("Build eval cases from closed Jira tickets with a merged MR that changed tests and code")
+  .option("--limit <n>", "stop after this many new cases", "20")
+  .option("--scan <n>", "how many closed tickets to look at", "120")
+  .option("--jql <jql>", "which tickets", "project = XEN AND statusCategory = Done ORDER BY resolved DESC")
+  .option("--dry-run", "report only, write nothing")
+  .action(async (opts) => {
+    const { config } = await import("./config.js");
+    const { JiraClient } = await import("./jira/client.js");
+    const { listMergedMrs, getMergedMrDetails, mentionsKey } = await import("./gitlab.js");
+    const { harvestOne, gitHasCommit, writeCase } = await import("./evals/harvest.js");
+    const { CASES_DIR } = await import("./evals/loadCases.js");
+    const { existsSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const { execFile } = await import("node:child_process");
+    const { promisify } = await import("node:util");
+
+    for (const kind of ["backend", "frontend"] as const) {
+      const r = config.repos[kind];
+      if (r.path) await promisify(execFile)("git", ["fetch", "origin", config.gitlab.targetBranch], { cwd: r.path }).catch(() => {});
+    }
+    const jira = new JiraClient(config.jira.baseUrl, config.jira.token);
+    const issues = await jira.searchIssues(opts.jql, Number(opts.scan));
+    const gl = { gitlabBaseUrl: config.gitlab.baseUrl, token: config.gitlab.token };
+    const index = {
+      backend: await listMergedMrs({ ...gl, projectPath: config.repos.backend.gitlabProjectPath }),
+      frontend: await listMergedMrs({ ...gl, projectPath: config.repos.frontend.gitlabProjectPath }),
+    };
+    console.log(`[harvest] merged MRs indexed: backend ${index.backend.length}, frontend ${index.frontend.length}`);
+    const deps = {
+      mergedMrs: async (repo: "backend" | "frontend", key: string) => {
+        const hits = index[repo].filter((m) => mentionsKey(`${m.title}\n${m.sourceBranch}\n${m.description}`, key));
+        // Details only when the match is unambiguous; harvestOne rejects several MRs anyway.
+        if (hits.length !== 1) return hits.map((m) => ({ iid: m.iid, title: m.title, sourceBranch: m.sourceBranch, changedPaths: [], webUrl: "" }));
+        const d = await getMergedMrDetails({ ...gl, projectPath: config.repos[repo].gitlabProjectPath, iid: hits[0].iid });
+        const text = `${hits[0].title}\n${hits[0].sourceBranch}\n${hits[0].description}`;
+        const keysMentioned = [...new Set((text.match(/\b[A-Z][A-Z0-9]+-\d+\b/gi) ?? []).map((k) => k.toUpperCase()))];
+        return [{ ...d, keysMentioned }];
+      },
+      hasCommit: (repo: "backend" | "frontend", sha: string) => (config.repos[repo].path ? gitHasCommit(config.repos[repo].path, sha) : Promise.resolve(false)),
+    };
+    let made = 0;
+    for (const i of issues) {
+      if (made >= Number(opts.limit)) break;
+      if (existsSync(join(CASES_DIR, `${i.key.toLowerCase()}.json`))) {
+        console.log(`= ${i.key}: уже есть`);
+        continue;
+      }
+      const out = await harvestOne({ key: i.key, title: i.summary, description: i.description }, deps);
+      await new Promise((r) => setTimeout(r, Number(process.env.HARVEST_PAUSE_MS ?? 300))); // be gentle with GitLab
+      if ("case" in out) {
+        if (!opts.dryRun) writeCase(CASES_DIR, out.case);
+        made++;
+        console.log(`+ ${i.key}: ${out.case.repo}, тестов ${out.case.hiddenTestPaths.length}${opts.dryRun ? " (dry-run)" : ""}`);
+      } else {
+        console.log(`- ${i.key}: ${out.skipped}`);
+      }
+    }
+    console.log(`\n${opts.dryRun ? "Подошло" : "Новых кейсов"}: ${made} из ${issues.length} просмотренных.`);
+  });
+
 registerFleetCommands(program);
 
 program.parseAsync(process.argv);

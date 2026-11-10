@@ -1,0 +1,13 @@
+{
+  "id": "XEN-193",
+  "title": "[web] Некорректное количество строк на странице при фильтрации документов по статусу",
+  "description": "При выборе любого статуса, отличного от «Все статусы» (например, «Активные»), на странице отображается меньше записей, чем указано в настройках пагинации. \r\n\r\nТакже такое поведение существенно фильтру по типам где идентично первому ломается отображение записей",
+  "repo": "frontend",
+  "baseCommit": "1e0f6d124baf392c20d24693e14500c5ac7aafef",
+  "referenceCommit": "c4183abe8dd433a90b0307662bd2a16b61ca4899",
+  "hiddenTestPaths": [
+    "src/app/(dashboard)/client/documents/document-type-labels.test.ts",
+    "src/app/(dashboard)/client/documents/feed-filters.test.ts",
+    "src/app/(dashboard)/client/documents/list-url-state.test.ts"
+  ]
+}

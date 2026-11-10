@@ -1,0 +1,11 @@
+{
+  "id": "XEN-177",
+  "title": "[backend] Падение воркера отправки дайджеста «Пока вы отдыхали» (TypeError: reading 'replace') приводит к безвозвратной потере писем",
+  "description": "Отправка писем не происходит (отправлено 0 писем). Проход падает с ошибкой в логах: {{quiet flush pass failed: Cannot read properties of undefined (reading 'replace')}}\r\n{code:java}\r\nЗаписи «Проверка висит» в колокольчике: 6 — все отложены тихими часами: да, все помечены flushed: да. \r\n· 2026-09-29 00:00 вт → X (CEO другой компании): «Проверка ждёт уже 3 рабочих дня: «Договор № X-1/26»» \r\n· 2026-09-30 00:00 ср → E1 (проверяющий): «Проверка ждёт уже 3 рабочих дня: «Договор поставки № А-01/26»» \r\n· 2026-10-02 00:00 пт → H (рук. «Продажи»): «Проверка обязательств стоит 5 рабочих дней: «Договор поставки № А-01/26»» \r\n· 2026-10-03 00:00 сб → E1 (проверяющий): «Проверка ждёт уже 3 рабочих дня: «Договор оказания услуг № Б-07/26»» \r\n· 2026-10-07 00:00 ср → H (рук. «Продажи»): «Проверка обязательств стоит 5 рабочих дней: «Договор оказания услуг № Б-07/26»» \r\n· 2026-10-07 00:00 ср → E1 (проверяющий): «Проверка ждёт уже 3 рабочих дня: «Договор аренды № В-12/26»» Предупреждения «quiet flush pass failed»: 6. \r\n· 2026-09-29 08:00 вт: quiet flush pass failed: Cannot read properties of undefined (reading 'replace') \r\n· 2026-09-30 08:00 ср: quiet flush pass failed: Cannot read properties of undefined (reading 'replace') \r\n· 2026-10-02 08:00 пт: quiet flush pass failed: Cannot read properties of undefined (reading 'replace') \r\n· 2026-10-03 08:00 сб: quiet flush pass failed: Cannot read properties of undefined (reading 'replace') \r\n· 2026-10-07 08:00 ср: quiet flush pass failed: Cannot read properties of undefined (reading 'replace') \r\n· 2026-10-07 08:15 ср: quiet flush pass failed: Cannot read properties of undefined (reading 'replace'){code}",
+  "repo": "backend",
+  "baseCommit": "f45e80cba3ccc67cc03d3d66eae17f949e92da90",
+  "referenceCommit": "ae1479099b4d4fef35212ec0a80c882c6991ff56",
+  "hiddenTestPaths": [
+    "src/modules/obligations/notifications/obligations-mail-runs.service.spec.ts"
+  ]
+}

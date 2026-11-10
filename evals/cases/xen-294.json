@@ -1,0 +1,14 @@
+{
+  "id": "XEN-294",
+  "title": "[web] Отсутствует возможность загрузить файл должностной инструкции при создании/редактировании должности.",
+  "description": "*Шаги:*\r\n # Открыть раздел Оргструктура -> Должности\r\n # Нажать «Создать должность».\r\n\r\n*ОР:* В форме присутствует элемент для прикрепления файла «Должностная инструкция».\r\n\r\n*ФР:* Поле для загрузки файла полностью отсутствует в интерфейсе.",
+  "repo": "frontend",
+  "baseCommit": "3c80afb6141579e08302231d08a319f5a67fbcd7",
+  "referenceCommit": "db1386e9b24c8dfe4ccbd76038072cf1f62ad15a",
+  "hiddenTestPaths": [
+    "src/api/org/positions-api.test.ts",
+    "src/features/org-audit/lib/audit-diff.test.ts",
+    "src/features/org-positions/lib/use-position-form.hook.test.ts",
+    "src/features/org-positions/ui/PositionsDictionary.test.tsx"
+  ]
+}

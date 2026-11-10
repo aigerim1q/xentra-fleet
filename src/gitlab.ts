@@ -95,10 +95,16 @@ export interface PipelineState {
   mrState: string;
 }
 
+// Retries a rate-limited read (429) up to 4 times, waiting Retry-After (or 2s, 4s, 8s, 16s).
 async function gitlabGet(baseUrl: string, token: string, path: string, signal?: AbortSignal): Promise<Response> {
-  const res = await fetch(`${baseUrl}/api/v4${path}`, { headers: { "PRIVATE-TOKEN": token }, signal });
-  if (!res.ok) throw new Error(`GitLab ${res.status}`);
-  return res;
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(`${baseUrl}/api/v4${path}`, { headers: { "PRIVATE-TOKEN": token }, signal });
+    if (res.ok) return res;
+    if (res.status !== 429 || attempt >= 4) throw new Error(`GitLab ${res.status}`);
+    const retryAfter = Number(res.headers.get("retry-after"));
+    const waitMs = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 2000 * 2 ** attempt;
+    await new Promise((r) => setTimeout(r, Math.min(waitMs, 60_000)));
+  }
 }
 
 export async function getMergeRequestPipeline(opts: { gitlabBaseUrl: string; token: string; projectPath: string; iid: number }): Promise<PipelineState> {
@@ -161,4 +167,68 @@ export async function mergeMergeRequest(opts: { gitlabBaseUrl: string; token: st
     body: JSON.stringify({ sha: opts.sha, should_remove_source_branch: true }),
   });
   if (!res.ok) throw new Error(`GitLab merge ${res.status}`);
+}
+
+export interface MergedMr {
+  iid: number;
+  title: string;
+  sourceBranch: string;
+  baseSha?: string; // diff_refs.base_sha — the target branch before the MR
+  referenceSha?: string; // the merged result on the target branch (merge or squash commit), else the MR head
+  changedPaths: string[]; // new paths of added/modified files (deleted files excluded)
+  webUrl: string;
+  keysMentioned?: string[]; // Jira keys in the MR's title/branch/description
+}
+
+export interface MergedMrSummary {
+  iid: number;
+  title: string;
+  sourceBranch: string;
+  description: string;
+}
+
+// The last `pages`×100 merged MRs of a project — one listing reused for every ticket
+// instead of a search per ticket (GitLab's search can't match source branches, and a
+// request per ticket runs into its rate limit).
+export async function listMergedMrs(opts: { gitlabBaseUrl: string; token: string; projectPath: string; pages?: number }): Promise<MergedMrSummary[]> {
+  const p = encodeURIComponent(opts.projectPath);
+  const out: MergedMrSummary[] = [];
+  for (let page = 1; page <= (opts.pages ?? 5); page++) {
+    const batch = (await (
+      await gitlabGet(opts.gitlabBaseUrl, opts.token, `/projects/${p}/merge_requests?state=merged&order_by=updated_at&sort=desc&per_page=100&page=${page}`)
+    ).json()) as Array<{ iid: number; title: string; source_branch: string; description: string | null }>;
+    out.push(...batch.map((m) => ({ iid: m.iid, title: m.title, sourceBranch: m.source_branch, description: m.description ?? "" })));
+    if (batch.length < 100) break;
+  }
+  return out;
+}
+
+// Whole-word key match: XEN-1 must not match XEN-12.
+export function mentionsKey(text: string, key: string): boolean {
+  return new RegExp(`(^|[^A-Za-z0-9])${key.replace(/[-]/g, "\\-")}(?![0-9])`, "i").test(text);
+}
+
+export async function getMergedMrDetails(opts: { gitlabBaseUrl: string; token: string; projectPath: string; iid: number }): Promise<MergedMr> {
+  const p = encodeURIComponent(opts.projectPath);
+  const full = (await (await gitlabGet(opts.gitlabBaseUrl, opts.token, `/projects/${p}/merge_requests/${opts.iid}`)).json()) as {
+    iid: number;
+    title: string;
+    source_branch: string;
+    web_url: string;
+    merge_commit_sha?: string | null;
+    squash_commit_sha?: string | null;
+    diff_refs?: { base_sha: string; head_sha: string } | null;
+  };
+  const diffs = (await (
+    await gitlabGet(opts.gitlabBaseUrl, opts.token, `/projects/${p}/merge_requests/${opts.iid}/diffs?per_page=100`)
+  ).json()) as Array<{ new_path: string; deleted_file: boolean }>;
+  return {
+    iid: full.iid,
+    title: full.title,
+    sourceBranch: full.source_branch,
+    baseSha: full.diff_refs?.base_sha,
+    referenceSha: full.merge_commit_sha ?? full.squash_commit_sha ?? full.diff_refs?.head_sha,
+    changedPaths: diffs.filter((d) => !d.deleted_file).map((d) => d.new_path),
+    webUrl: full.web_url,
+  };
 }

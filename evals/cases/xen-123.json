@@ -1,0 +1,18 @@
+{
+  "id": "XEN-123",
+  "title": "QR-этикетки и поиск",
+  "description": "h3. *Зачем*\r\n\r\nЧтобы найти или проверить вещь, ее нужно быстро опознать. Без метки инвентаризация и выдача невозможны.\r\nh3. *Что делать*\r\n\r\n1. У каждого актива есть QR со ссылкой на его карточку.\r\n2. Печать этикеток: завхоз выбирает активы (по фильтру или вручную) и скачивает PDF: QR, инвентарный номер, название компании. Размер этикетки из 2 или 3 типовых.\r\n3. Скан QR открывает карточку только вошедшему пользователю с правом на просмотр. Без входа показывается просьба войти, данных актива нет.\r\n4. Повторная печать этикетки из карточки.\r\n5. Поиск по инвентарному и серийному номеру. Карточка и поиск удобны на смартфоне (Safari на iOS, Chrome на Android).\r\nh3. *Критерии приемки*\r\n\r\n1. У каждого актива рабочая ссылка в QR.\r\n2. PDF этикеток скачивается для выбранных активов в выбранном размере.\r\n3. Скан без входа не показывает данных.\r\n4. Скан со входом и правом открывает карточку.\r\n5. Поиск находит актив по инвентарному и серийному номеру.\r\n6. Карточка корректно выглядит на смартфоне.",
+  "repo": "backend",
+  "baseCommit": "6799b909a1e78381b250d995fcd51d20498cb2c5",
+  "referenceCommit": "9e8941b4b6b620760f85963e72be2ec40ebe6929",
+  "hiddenTestPaths": [
+    "src/modules/assets/dto/asset-labels.dto.spec.ts",
+    "src/modules/assets/lib/asset-label-pdf.spec.ts",
+    "src/modules/assets/lib/asset-response.mapper.spec.ts",
+    "src/modules/assets/lib/asset-where.spec.ts",
+    "src/modules/assets/asset-documents.service.spec.ts",
+    "src/modules/assets/asset-events.service.spec.ts",
+    "src/modules/assets/asset-labels.controller.spec.ts",
+    "src/modules/assets/asset-labels.service.spec.ts"
+  ]
+}

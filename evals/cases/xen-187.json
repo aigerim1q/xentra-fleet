@@ -1,0 +1,13 @@
+{
+  "id": "XEN-187",
+  "title": "В карточке контрагента вместо названия компании показан задвоенный ИИН",
+  "description": "Можете изучить это уже старый баг, надо исправить\n\nПрислал в Telegram: Almaz\nhttps://t.me/c/3872800782/7399",
+  "repo": "backend",
+  "baseCommit": "e7651cb59ad80389a4f88a8770a0e9cdffc54a7a",
+  "referenceCommit": "21dd3eb52428c409b73cf58f126aab6026d9d945",
+  "hiddenTestPaths": [
+    "src/modules/document-access/services/access-context.service.spec.ts",
+    "src/modules/documents/signing-card/signing-card-data.service.spec.ts",
+    "src/modules/sms-signature/tests/phone.util.spec.ts"
+  ]
+}
