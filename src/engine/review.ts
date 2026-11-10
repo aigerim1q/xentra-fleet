@@ -124,6 +124,7 @@ export async function reviewChanges(
   const diffText = await getWorktreeDiff(worktreeDir, opts.baseBranch).catch(() => "");
 
   const turn = await runClaudeTurn({
+    logLabel: "reviewer",
     cwd: worktreeDir,
     prompt: buildReviewPrompt(task, diffText),
     permissionMode: "acceptEdits",

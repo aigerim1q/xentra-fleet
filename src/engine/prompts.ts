@@ -98,3 +98,32 @@ export function buildFeedbackPrompt(failedGates: GateResult[]): string {
     "contradicts the task, stop and say so instead.",
   ].join("\n");
 }
+
+// Continue after the harness killed a turn on time (idle watchdog or turn ceiling).
+// Sent into the SAME session via --resume, so the task itself is already known — this
+// only says what happened, where the unfinished edits are, and to check before trusting
+// them (the turn was cut mid-way, the last edit may be half-done).
+export function buildTimeoutResumePrompt(stoppedBy: { kind: "idle" | "ceiling"; afterMs: number; checkpointCommitted: boolean }): string {
+  const minutes = Math.round(stoppedBy.afterMs / 60000);
+  const why =
+    stoppedBy.kind === "idle"
+      ? `the session produced no output for ${minutes} min (idle watchdog)`
+      : `the turn ran past its ${minutes}-min time limit`;
+  return [
+    `Your previous turn was stopped by the harness: ${why}.`,
+    stoppedBy.checkpointCommitted
+      ? "Your unfinished edits at that moment were saved as a commit \"wip: checkpoint ...\" in this worktree (see `git log`)."
+      : "There were no unfinished edits to save at that moment.",
+    "The turn was cut mid-way, so the last edit may be incomplete. Re-read the files you",
+    "were changing, check them against the acceptance criteria, then finish the task.",
+    "If you were stuck on something, take a different approach instead of repeating it.",
+  ].join("\n");
+}
+
+// The same notice for a continue that has to start a fresh session (no session id to
+// resume): prepended to buildContinuationPrompt's diff-based handover.
+export function buildTimeoutCheckpointNote(stoppedBy: { checkpointCommitted: boolean }): string {
+  return stoppedBy.checkpointCommitted
+    ? "The previous session was stopped on time; its unfinished edits are in a \"wip: checkpoint ...\" commit, included in the diff below."
+    : "The previous session was stopped on time before making further edits.";
+}

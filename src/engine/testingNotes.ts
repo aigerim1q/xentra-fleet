@@ -64,6 +64,7 @@ export async function generateTestingNotes(
   const diffText = await getWorktreeDiff(worktreeDir, opts.baseBranch).catch(() => "");
 
   const turn = await runClaudeTurn({
+    logLabel: "testing",
     cwd: worktreeDir,
     prompt: buildTestingNotesPrompt(task, diffText),
     permissionMode: "acceptEdits",

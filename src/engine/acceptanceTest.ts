@@ -105,6 +105,7 @@ export async function writeAcceptanceTest(
   const prompt = buildAcceptanceTestPrompt(task, relPath);
 
   const turn = await runClaudeTurn({
+    logLabel: "acceptance",
     cwd: worktreeDir,
     prompt,
     permissionMode: "acceptEdits",

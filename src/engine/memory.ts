@@ -110,6 +110,7 @@ export async function updateProjectMemory(
   const diffText = await getWorktreeDiff(worktreeDir, opts.baseBranch).catch(() => "");
 
   const turn = await runClaudeTurn({
+    logLabel: "memory",
     cwd: worktreeDir,
     prompt: buildMemoryUpdatePrompt(task, existing, diffText),
     permissionMode: "acceptEdits",

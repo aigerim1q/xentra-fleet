@@ -65,6 +65,10 @@ export interface CloseLoopResumeState {
   // already tried or why), which is exactly why it only ever happens on an explicit
   // human click (the "🔄 Продолжить" button), never automatically.
   freshSession?: boolean;
+  // Set only for a turn_timeout stop: what killed the implement turn and whether its
+  // unfinished edits went into a "wip: checkpoint" commit. The continue turn is told
+  // both (buildTimeoutResumePrompt), as the CTO fleet does after a timeout kill.
+  stoppedBy?: { kind: "idle" | "ceiling"; afterMs: number; checkpointCommitted: boolean };
 }
 
 // Present only on a brief raised during a cross-repo task's backend or frontend half —

@@ -4,6 +4,7 @@ import type { ClaudeTurnResult } from "../types.js";
 import { buildDisallowedTools, withAlwaysDisallowed } from "./guardrails.js";
 import { SECRET_ENV_VARS, config, secretValues } from "../config.js";
 import { scrubSecrets } from "./secretScrub.js";
+import { openSessionLog } from "./sessionLog.js";
 
 // Denylist, not allowlist: the `claude` CLI's own auth/config env surface (PATH, HOME,
 // proxy settings, NODE_OPTIONS, whatever it reads for login state) isn't fully known
@@ -34,6 +35,8 @@ interface RunClaudeTurnOptions {
   // Default to config.agentIdleTimeoutMs / agentTurnTimeoutMs; 0 disables.
   idleTimeoutMs?: number;
   turnTimeoutMs?: number;
+  // Role name for the session journal file (engine/sessionLog.ts), e.g. "dev", "pm".
+  logLabel?: string;
 }
 
 // Thrown when the harness itself killed the turn: "idle" — the stream went silent for
@@ -142,6 +145,7 @@ export async function runClaudeTurn(opts: RunClaudeTurnOptions): Promise<ClaudeT
   await new Promise<void>((resolve, reject) => {
     const child = spawn("claude", args, { cwd: opts.cwd, env: buildAgentEnv() });
     currentChild = child;
+    const journal = openSessionLog(opts.logLabel ?? "turn", secretValues());
 
     let stoppedBy: { kind: "idle" | "ceiling"; afterMs: number } | undefined;
     let killTimer: NodeJS.Timeout | undefined;
@@ -163,6 +167,7 @@ export async function runClaudeTurn(opts: RunClaudeTurnOptions): Promise<ClaudeT
     const rl = createInterface({ input: child.stdout });
     rl.on("line", (line) => {
       armIdle();
+      journal?.write(line);
       if (!line.trim()) return;
       let event: Record<string, unknown>;
       try {
@@ -196,6 +201,7 @@ export async function runClaudeTurn(opts: RunClaudeTurnOptions): Promise<ClaudeT
 
     child.stderr.on("data", (chunk) => (stderrText += chunk));
     child.on("error", (err) => {
+      journal?.close();
       clearTimeout(ceilingTimer);
       clearTimeout(idleTimer);
       clearTimeout(killTimer);
@@ -203,6 +209,7 @@ export async function runClaudeTurn(opts: RunClaudeTurnOptions): Promise<ClaudeT
     });
     child.on("close", (code, signal) => {
       currentChild = null;
+      journal?.close();
       clearTimeout(ceilingTimer);
       clearTimeout(idleTimer);
       clearTimeout(killTimer);

@@ -99,6 +99,11 @@ program
   .description("Start the Telegram bot that drives the queue")
   .action(async () => {
     const { startBot } = await import("./bot/bot.js");
+    const { pruneSessionLogs } = await import("./engine/sessionLog.js");
+    const { HARNESS_STATE_DIR } = await import("./bot/liveState.js");
+    const { config } = await import("./config.js");
+    const pruned = pruneSessionLogs(HARNESS_STATE_DIR, config.sessionLogRetentionDays);
+    if (pruned > 0) console.log(`[bot] pruned ${pruned} session journal(s) older than ${config.sessionLogRetentionDays} days`);
     await startBot();
   });
 

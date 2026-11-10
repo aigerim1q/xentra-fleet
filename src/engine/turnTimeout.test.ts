@@ -71,3 +71,22 @@ test("messageContextTokens sums input and both cache fields, tolerating gaps", (
   assert.equal(messageContextTokens({ input_tokens: 4 }), 4);
   assert.equal(messageContextTokens(undefined), 0);
 });
+
+test("inside a task scope the turn's stream is journaled to sessions/*.jsonl", async () => {
+  const { withTaskLogScope } = await import("./sessionLog.js");
+  const { readdirSync, readFileSync } = await import("node:fs");
+  const state = mkdtempSync(join(tmpdir(), "state-"));
+  try {
+    process.env.FAKE_CLAUDE_MODE = "ok";
+    await withTaskLogScope("XEN-9", state, () => runClaudeTurn({ ...base, logLabel: "dev", idleTimeoutMs: 5000, turnTimeoutMs: 10_000 }));
+    const dir = join(state, "tasks", "XEN-9", "sessions");
+    const files = readdirSync(dir);
+    assert.equal(files.length, 1);
+    assert.match(files[0], /-dev\.jsonl$/);
+    const lines = readFileSync(join(dir, files[0]), "utf8").trim().split("\n");
+    assert.equal(lines.length, 4); // init, two assistant events, result
+    assert.equal(JSON.parse(lines[3]).type, "result");
+  } finally {
+    rmSync(state, { recursive: true, force: true });
+  }
+});

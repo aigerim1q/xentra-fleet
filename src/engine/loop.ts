@@ -213,6 +213,7 @@ async function runPostImplementSuccess(
         summary: `Правлю по замечаниям ревьюера (раунд ${round})`,
       });
       const fixTurn = await runClaudeTurn({
+        logLabel: "dev-review-fix",
         cwd: worktreeDir,
         prompt: fixPrompt,
         permissionMode: config.permissionMode,
@@ -504,6 +505,7 @@ export async function runCloseLoop(task: TaskSpec, config: EngineConfig): Promis
     let turn: ClaudeTurnResult;
     try {
       turn = await runClaudeTurn({
+        logLabel: "dev",
         cwd: worktreeDir,
         prompt,
         permissionMode: config.permissionMode,
@@ -525,6 +527,10 @@ export async function runCloseLoop(task: TaskSpec, config: EngineConfig): Promis
         `⏱ Ход остановлен: ${err.kind === "idle" ? "агент молчал" : "превышен лимит времени"} ${Math.round(err.afterMs / 60000)} мин` +
           (checkpointCommitted ? " — незаконченные правки сохранены WIP-коммитом." : "."),
       );
+      const stoppedBy = { kind: err.kind, afterMs: err.afterMs, checkpointCommitted };
+      // The killed turn's session id comes from the stream's init event; failing that,
+      // the previous turn's. With neither, continuing has to start a fresh session.
+      const sessionId = err.sessionId ?? resumeSessionId ?? "";
       return {
         task,
         success: false,
@@ -533,7 +539,22 @@ export async function runCloseLoop(task: TaskSpec, config: EngineConfig): Promis
         stopReason: "turn_timeout",
         worktreeDir,
         acceptanceTestPath,
-        turnTimeout: { kind: err.kind, afterMs: err.afterMs, checkpointCommitted },
+        turnTimeout: stoppedBy,
+        resumeState: {
+          sessionId,
+          worktreeDir,
+          // Same slot again: the killed turn verified nothing, and i+1 on the last
+          // iteration would leave the continue with zero turns.
+          iteration: i,
+          totalCostUsd,
+          gates,
+          baselines,
+          extraDeniedPaths,
+          acceptanceTestPath,
+          previousFingerprint,
+          freshSession: sessionId === "",
+          stoppedBy,
+        },
       };
     }
     totalCostUsd += turn.totalCostUsd;
@@ -622,6 +643,7 @@ export async function runCloseLoop(task: TaskSpec, config: EngineConfig): Promis
       });
       const remaining = config.maxBudgetUsd - totalCostUsd;
       const handoffTurn = await runClaudeTurn({
+        logLabel: "dev-handoff",
         cwd: worktreeDir,
         prompt: buildHandoffRequestPrompt(failedNow),
         permissionMode: config.permissionMode,

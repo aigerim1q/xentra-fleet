@@ -191,6 +191,8 @@ export const config = {
   // dev session_timeout). 0 disables either one.
   agentIdleTimeoutMs: Number(process.env.AGENT_IDLE_TIMEOUT_MS ?? 30 * 60 * 1000),
   agentTurnTimeoutMs: Number(process.env.AGENT_TURN_TIMEOUT_MS ?? 5 * 60 * 60 * 1000),
+  // Session journals (engine/sessionLog.ts) older than this are deleted at bot start; 0 keeps them.
+  sessionLogRetentionDays: Number(process.env.SESSION_LOG_RETENTION_DAYS ?? 14),
   maxIterations: Number(process.env.MAX_ITERATIONS ?? 5),
   maxBudgetUsd: Number(process.env.MAX_BUDGET_USD ?? 5),
   // Context policy follows the CTO fleet: one session per task, continued with --resume;

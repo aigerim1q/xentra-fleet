@@ -47,6 +47,7 @@ export async function generateCloseReport(
   const diffText = await getWorktreeDiff(worktreeDir, opts.baseBranch).catch(() => "");
 
   const turn = await runClaudeTurn({
+    logLabel: "report",
     cwd: worktreeDir,
     prompt: buildCloseReportPrompt(task, diffText),
     permissionMode: "acceptEdits",

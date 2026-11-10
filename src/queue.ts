@@ -3,12 +3,14 @@ import { JiraClient, type JiraIssue } from "./jira/client.js";
 import { detectRepo, toTaskSpec, type RepoDetection } from "./jira/mapToTask.js";
 import { runCloseLoop } from "./engine/loop.js";
 import { buildBriefAnswerPrompt } from "./engine/brief.js";
-import { buildContinuationPrompt } from "./engine/prompts.js";
+import { buildContinuationPrompt, buildTimeoutCheckpointNote, buildTimeoutResumePrompt } from "./engine/prompts.js";
 import { runClaudeTurn } from "./engine/claudeEngine.js";
 import { parseProposalResponse } from "./engine/proposal.js";
 import { readMemoryFiles, buildMemoryContextBlock } from "./engine/memory.js";
 import { createMergeRequest, findMergeRequestForIssue, pushBranch } from "./gitlab.js";
 import { buildContextPack } from "./engine/contextPack.js";
+import { withTaskLogScope } from "./engine/sessionLog.js";
+import { HARNESS_STATE_DIR } from "./bot/liveState.js";
 import {
   startJob,
   updateJob,
@@ -143,13 +145,14 @@ async function proposeSolution(
     "(3-7 критериев — что именно должно стать верным, чтобы задача считалась решённой;",
     "формулируй так, чтобы по каждому можно было однозначно сказать да или нет)",
   ].join("\n");
-  const turn = await runClaudeTurn({
+  const turn = await withTaskLogScope(task.id, HARNESS_STATE_DIR, () => runClaudeTurn({
+    logLabel: "pm",
     cwd: repoPath,
     prompt,
     permissionMode: "acceptEdits",
     disallowedToolsOverride: "Bash,Edit,Write,MultiEdit",
     model: config.models.propose,
-  });
+  }));
   const { plan, acceptanceCriteria } = parseProposalResponse(turn.resultText);
   return { plan, acceptanceCriteria, costUsd: turn.totalCostUsd };
 }
@@ -574,7 +577,7 @@ async function closeLoopAndPush(
   // A resume continues an existing session (or hands it the diff) — only a fresh start
   // builds the initial prompt that carries the briefing.
   const contextPack = resumeFrom ? "" : await loadContextPack(issue.key, repo.gitlabProjectPath);
-  const result = await runCloseLoop(task, {
+  const result = await withTaskLogScope(issue.key, HARNESS_STATE_DIR, () => runCloseLoop(task, {
     repoPath: repo.path,
     contextPack,
     branchName,
@@ -614,7 +617,7 @@ async function closeLoopAndPush(
       checkpointAt(worktreeDirFor(branchName), iteration, costUsd, phase);
     },
     onLog: appendLog,
-  });
+  }));
 
   if (result.stopReason === "brief_pending") {
     return { closeLoopResult: result, briefPending: true };
@@ -1219,8 +1222,17 @@ export async function continueNeedsHuman(): Promise<QueueRunOutcome | null> {
   startJob(pending.issueKey, pending.title, pending.description, pending.gitlabProjectPath, config.maxIterations);
   const startedAt = Date.now();
   try {
-    const diff = await getWorktreeDiff(pending.resumeState.worktreeDir, config.gitlab.targetBranch);
-    const prompt = buildContinuationPrompt(task, diff.slice(0, MAX_CONTINUATION_DIFF_CHARS));
+    const { stoppedBy, freshSession } = pending.resumeState;
+    let prompt: string;
+    if (stoppedBy && !freshSession) {
+      // Stopped on time with a known session: continue that very session (CTO-style
+      // --resume), told what happened and where the checkpoint is.
+      prompt = buildTimeoutResumePrompt(stoppedBy);
+    } else {
+      const diff = await getWorktreeDiff(pending.resumeState.worktreeDir, config.gitlab.targetBranch);
+      prompt = buildContinuationPrompt(task, diff.slice(0, MAX_CONTINUATION_DIFF_CHARS));
+      if (stoppedBy) prompt = `${buildTimeoutCheckpointNote(stoppedBy)}\n\n${prompt}`;
+    }
     const outcome = await closeLoopAndPush(issue, repo, task, pending.branchName, { ...pending.resumeState, prompt });
     const jobOutcome = await handleCloseLoopOutcome(jira, issue, repo, task, pending.branchName, outcome);
     if (jobOutcome.kind === "closed" || jobOutcome.kind === "needs_human") {

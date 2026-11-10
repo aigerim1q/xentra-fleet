@@ -247,8 +247,12 @@ async function sendNeedsHumanReview(
   // fresh session with no memory of what the stopped one already tried — so it's
   // offered, never assumed; every other needs_human reason has no resumeState and
   // never shows this third button at all.
-  if (getLiveState().pendingHumanReview?.resumeState) {
-    keyboard.row().text("🔄 Продолжить (новая сессия)", `continue_human:${outcome.issueKey}`);
+  const resumeState = getLiveState().pendingHumanReview?.resumeState;
+  if (resumeState) {
+    // A time-stopped turn with a known session continues that session; a context stop
+    // (or a timeout with no session id) starts a fresh one.
+    const label = resumeState.freshSession ? "🔄 Продолжить (новая сессия)" : "🔄 Продолжить (та же сессия)";
+    keyboard.row().text(label, `continue_human:${outcome.issueKey}`);
   }
   await send(text, keyboard);
 }

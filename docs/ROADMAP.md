@@ -37,13 +37,11 @@ Fable 5.1 недоступна на подписке («out of usage credits»).
 
 ## Фазы
 
-### Фаза 1 — качество конвейера (в текущем процессе)
+### Фаза 1 — качество конвейера (в текущем процессе) — ✅ закрыта 2026-11-10
 1. ✅ **Codex-ревьюер** (`src/engine/codexReview.ts`, параллельно с Claude-ревьюером; выключатель `CODEX_REVIEW_ENABLED`): `codex exec --sandbox read-only -m $CODEX_REVIEW_MODEL -c model_reasoning_effort=$CODEX_REVIEW_EFFORT --output-schema … -o …`, env без токенов; блокирует, если блокирует любой из двух ревьюеров.
 2. ✅ **Пакет контекста** (`src/engine/contextPack.ts`; выключатель `CONTEXT_PACK_ENABLED`) перед PM и разработчиком: карточка Jira + 3 последних комментария, MR и пайплайн.
-3. **Журнал сессии** (`stream-json` → `.jsonl` с маскированием) + idle watchdog + жёсткий timeout.
-   ✅ idle watchdog 30 мин и потолок хода 5 ч (`AGENT_IDLE_TIMEOUT_MS`, `AGENT_TURN_TIMEOUT_MS`, `TurnTimeoutError` в `claudeEngine.ts`). Осталось: журнал `.jsonl`.
-4. **WIP-коммит перед принудительной остановкой** и пометка в следующем промпте.
-   ✅ WIP-коммит `wip: checkpoint …` при остановке хода разработчика, задача → человеку (`turn_timeout`). Осталось: пометка в следующем промпте при продолжении.
+3. ✅ **Журнал сессии** (`src/engine/sessionLog.ts`): поток каждого хода → `.harness-state/tasks/<KEY>/sessions/<время>-<роль>.jsonl`, секреты маскируются, хранение `SESSION_LOG_RETENTION_DAYS` (14 дней, чистка при старте бота). Idle watchdog 30 мин и потолок хода 5 ч (`AGENT_IDLE_TIMEOUT_MS`, `AGENT_TURN_TIMEOUT_MS`).
+4. ✅ **WIP-коммит перед принудительной остановкой** и пометка в следующем промпте: `wip: checkpoint …`, задача → человеку (`turn_timeout`), кнопка «Продолжить (та же сессия)» — `--resume` с `buildTimeoutResumePrompt`.
 5. ✅ **Политика контекста как у CTO**: одна сессия на задачу через `--resume`, сжатие — штатное у Claude Code (`CLAUDE_CODE_AUTO_COMPACT_WINDOW`), ограничение по времени, а не по токенам. Передача по порогу токенов и стоп `CONTEXT_BUDGET_TOKENS` — выключены по умолчанию. Замер контекста исправлен: размер последнего вызова модели, а не сумма `usage` за ход (сумма завышала в разы).
 
 ### Фаза 2 — роли и почта
