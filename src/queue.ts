@@ -1,4 +1,4 @@
-import { config } from "./config.js";
+import { config, secretValues } from "./config.js";
 import { JiraClient, type JiraIssue } from "./jira/client.js";
 import { detectRepo, toTaskSpec, type RepoDetection } from "./jira/mapToTask.js";
 import { runCloseLoop } from "./engine/loop.js";
@@ -7,7 +7,8 @@ import { buildContinuationPrompt } from "./engine/prompts.js";
 import { runClaudeTurn } from "./engine/claudeEngine.js";
 import { parseProposalResponse } from "./engine/proposal.js";
 import { readMemoryFiles, buildMemoryContextBlock } from "./engine/memory.js";
-import { createMergeRequest, pushBranch } from "./gitlab.js";
+import { createMergeRequest, findMergeRequestForIssue, pushBranch } from "./gitlab.js";
+import { buildContextPack } from "./engine/contextPack.js";
 import {
   startJob,
   updateJob,
@@ -117,12 +118,18 @@ const declinedKeys = new Set<string>();
 // change them (TaskSpec is never mutated after dispatch). Reduces scope drift the same
 // way Avengers Harness's frozen-acceptance-tests idea does, just without a separate
 // executable-test layer.
-async function proposeSolution(task: TaskSpec, repoPath: string): Promise<{ plan: string; acceptanceCriteria: string[]; costUsd: number }> {
+async function proposeSolution(
+  task: TaskSpec,
+  repoPath: string,
+  gitlabProjectPath: string,
+): Promise<{ plan: string; acceptanceCriteria: string[]; costUsd: number }> {
   const memoryContext = buildMemoryContextBlock(await readMemoryFiles(repoPath, "pm"), "pm");
+  const contextPack = await loadContextPack(task.id, gitlabProjectPath);
   const prompt = [
     `Задача ${task.id}: ${task.title}`,
     "",
     task.description,
+    contextPack ? `\n${contextPack}\n` : "",
     memoryContext ? `\n${memoryContext}\n` : "",
     "Не редактируй и не создавай файлы — только изучи код (Read/Grep/Glob).",
     "Ответь строго в этом формате, на русском:",
@@ -147,6 +154,35 @@ async function proposeSolution(task: TaskSpec, repoPath: string): Promise<{ plan
   return { plan, acceptanceCriteria, costUsd: turn.totalCostUsd };
 }
 
+// Briefing for the PM and first dev turn (engine/contextPack.ts). Never throws: with the
+// feature off, or anything unexpected, the turn just starts without it.
+async function loadContextPack(issueKey: string, gitlabProjectPath: string): Promise<string> {
+  if (!config.contextPack.enabled) return "";
+  try {
+    const jira = new JiraClient(config.jira.baseUrl, config.jira.token);
+    return await buildContextPack(
+      issueKey,
+      {
+        card: (signal) => jira.getIssueCard(issueKey, signal),
+        comments: (signal) => jira.getRecentComments(issueKey, config.contextPack.comments, signal),
+        mergeRequest: config.gitlab.token
+          ? (signal) =>
+              findMergeRequestForIssue({
+                gitlabBaseUrl: config.gitlab.baseUrl,
+                token: config.gitlab.token,
+                projectPath: gitlabProjectPath,
+                issueKey,
+                signal,
+              })
+          : undefined,
+      },
+      { timeoutMs: config.contextPack.timeoutMs, knownSecrets: secretValues() },
+    );
+  } catch {
+    return "";
+  }
+}
+
 // Cross-repo tickets (tagged [backend]+[frontend]/[web]) get one proposeSolution turn
 // per repo instead of one combined turn — each only ever reads its own codebase, so
 // its own plan/criteria naturally come out scoped to what it can actually see, with no
@@ -160,8 +196,8 @@ async function proposeCrossRepoSolution(
   task: TaskSpec,
 ): Promise<{ plan: string; acceptanceCriteria: string[]; costUsd: number }> {
   const [backend, frontend] = await Promise.all([
-    proposeSolution(task, config.repos.backend.path),
-    proposeSolution(task, config.repos.frontend.path),
+    proposeSolution(task, config.repos.backend.path, config.repos.backend.gitlabProjectPath),
+    proposeSolution(task, config.repos.frontend.path, config.repos.frontend.gitlabProjectPath),
   ]);
   return {
     plan: `[backend]\n${backend.plan}\n\n[frontend]\n${frontend.plan}`,
@@ -257,7 +293,7 @@ async function proposeIssue(
   await onAnalyzing?.(issue.key);
 
   const task = toTaskSpec(issue);
-  const { plan, acceptanceCriteria, costUsd } = await proposeSolution(task, repo.path);
+  const { plan, acceptanceCriteria, costUsd } = await proposeSolution(task, repo.path, repo.gitlabProjectPath);
   const costEstimate = estimateCost(loadState(), detection.kind);
 
   setPendingApproval({
@@ -535,8 +571,12 @@ async function closeLoopAndPush(
     });
   };
 
+  // A resume continues an existing session (or hands it the diff) — only a fresh start
+  // builds the initial prompt that carries the briefing.
+  const contextPack = resumeFrom ? "" : await loadContextPack(issue.key, repo.gitlabProjectPath);
   const result = await runCloseLoop(task, {
     repoPath: repo.path,
+    contextPack,
     branchName,
     gates: repo.gates,
     maxIterations: config.maxIterations,

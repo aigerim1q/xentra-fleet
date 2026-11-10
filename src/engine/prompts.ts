@@ -20,7 +20,7 @@ export function buildTestIntegrityRule(briefsEnabled = true): string {
   ].join("\n");
 }
 
-export function buildInitialPrompt(task: TaskSpec, memoryContext = "", briefsEnabled = true): string {
+export function buildInitialPrompt(task: TaskSpec, memoryContext = "", briefsEnabled = true, contextPack = ""): string {
   const criteria = task.acceptanceCriteria.map((c, i) => `${i + 1}. ${c}`).join("\n");
   return [
     `Task ${task.id}: ${task.title}`,
@@ -29,6 +29,7 @@ export function buildInitialPrompt(task: TaskSpec, memoryContext = "", briefsEna
     "",
     "Acceptance criteria:",
     criteria,
+    contextPack ? `\n${contextPack}\n` : "",
     memoryContext ? `\n${memoryContext}\n` : "",
     "Implement this fully in the current repository by editing files directly.",
     "Follow the project's existing conventions. You do not have shell access in",

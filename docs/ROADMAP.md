@@ -39,7 +39,7 @@ Fable 5.1 недоступна на подписке («out of usage credits»).
 
 ### Фаза 1 — качество конвейера (в текущем процессе)
 1. ✅ **Codex-ревьюер** (`src/engine/codexReview.ts`, параллельно с Claude-ревьюером; выключатель `CODEX_REVIEW_ENABLED`): `codex exec --sandbox read-only -m $CODEX_REVIEW_MODEL -c model_reasoning_effort=$CODEX_REVIEW_EFFORT --output-schema … -o …`, env без токенов; блокирует, если блокирует любой из двух ревьюеров.
-2. **Пакет контекста** перед PM и разработчиком: карточка Jira + 3 последних комментария, MR и пайплайн.
+2. ✅ **Пакет контекста** (`src/engine/contextPack.ts`; выключатель `CONTEXT_PACK_ENABLED`) перед PM и разработчиком: карточка Jira + 3 последних комментария, MR и пайплайн.
 3. **Журнал сессии** (`stream-json` → `.jsonl` с маскированием) + idle watchdog + жёсткий timeout.
 4. **WIP-коммит перед принудительной остановкой** и пометка в следующем промпте.
 

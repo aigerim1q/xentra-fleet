@@ -124,6 +124,9 @@ export interface GateResult {
 
 export interface EngineConfig {
   repoPath: string;
+  // Jira card + recent comments + MR/pipeline (engine/contextPack.ts), built before the
+  // turn by the queue. Only the initial implement prompt uses it; empty = none.
+  contextPack?: string;
   branchName: string;
   gates: GateSpec[];
   maxIterations: number;

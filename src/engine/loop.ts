@@ -482,7 +482,7 @@ export async function runCloseLoop(task: TaskSpec, config: EngineConfig): Promis
     // "dev" — this is the implement role's own memory, separate from pm's/reviewer's.
     const memories = await readMemoryFiles(config.repoPath, "dev");
     const memoryContext = buildMemoryContextBlock(memories, "dev");
-    prompt = buildInitialPrompt(task, memoryContext, config.briefsEnabled !== false);
+    prompt = buildInitialPrompt(task, memoryContext, config.briefsEnabled !== false, config.contextPack ?? "");
     startIteration = 0;
   }
 

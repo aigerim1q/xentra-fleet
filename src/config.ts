@@ -139,6 +139,13 @@ export const config = {
   // need a hard stop the same way MAX_ITERATIONS is one for the gate-fixing loop —
   // otherwise a pair that never agrees just burns the whole task budget arguing.
   maxReviewRounds: Number(process.env.MAX_REVIEW_ROUNDS ?? 3),
+  // Model-free briefing (Jira card, last comments, MR + pipeline) prepended to the PM
+  // and first dev prompt — see engine/contextPack.ts. Fail-open, hard deadline.
+  contextPack: {
+    enabled: (process.env.CONTEXT_PACK_ENABLED ?? "true") !== "false",
+    comments: Number(process.env.CONTEXT_PACK_COMMENTS ?? 3),
+    timeoutMs: Number(process.env.CONTEXT_PACK_TIMEOUT_MS ?? 15000),
+  },
   // Second reviewer on another provider (Codex CLI, ChatGPT login). On when
   // CODEX_REVIEW_MODEL is set and CODEX_REVIEW_ENABLED isn't "false"; runs alongside
   // the Claude reviewer, and a blocking finding from either one blocks.

@@ -8,6 +8,21 @@ export interface JiraIssue {
   status?: string;
 }
 
+export interface JiraIssueCard {
+  status: string;
+  issueType?: string;
+  priority?: string;
+  assignee?: string;
+  labels: string[];
+  updated?: string;
+}
+
+export interface JiraComment {
+  author: string;
+  created: string;
+  body: string;
+}
+
 export interface JiraTransition {
   id: string;
   name: string;
@@ -76,6 +91,48 @@ export class JiraClient {
       description: descriptionToText(data.fields.description),
       status: data.fields.status.name,
     };
+  }
+
+  /** Status, type, priority, assignee, labels — the card a human sees at a glance. */
+  async getIssueCard(issueKey: string, signal?: AbortSignal): Promise<JiraIssueCard> {
+    const data = (await this.request(
+      `/rest/api/2/issue/${issueKey}?fields=status,issuetype,priority,assignee,labels,updated`,
+      { signal },
+    )) as {
+      fields: {
+        status: { name: string };
+        issuetype?: { name: string } | null;
+        priority?: { name: string } | null;
+        assignee?: { displayName: string } | null;
+        labels?: string[];
+        updated?: string;
+      };
+    };
+    const f = data.fields;
+    return {
+      status: f.status.name,
+      issueType: f.issuetype?.name,
+      priority: f.priority?.name,
+      assignee: f.assignee?.displayName,
+      labels: f.labels ?? [],
+      updated: f.updated,
+    };
+  }
+
+  /** The last `count` comments, oldest first. Two requests: one for the total, one for the tail. */
+  async getRecentComments(issueKey: string, count: number, signal?: AbortSignal): Promise<JiraComment[]> {
+    type Page = { total: number; comments: Array<{ author?: { displayName?: string }; created: string; body: unknown }> };
+    const head = (await this.request(`/rest/api/2/issue/${issueKey}/comment?maxResults=0`, { signal })) as Page;
+    if (head.total === 0) return [];
+    const startAt = Math.max(0, head.total - count);
+    const page = (await this.request(`/rest/api/2/issue/${issueKey}/comment?startAt=${startAt}&maxResults=${count}`, {
+      signal,
+    })) as Page;
+    return page.comments.map((c) => ({
+      author: c.author?.displayName ?? "?",
+      created: c.created,
+      body: descriptionToText(c.body),
+    }));
   }
 
   /** Transitions the workflow allows from the issue's current status, for the current user. */
