@@ -1165,5 +1165,19 @@ export async function startBot(): Promise<void> {
       { command: "help", description: "Помощь" },
     ])
     .catch((err: Error) => console.warn(`[bot] setMyCommands failed: ${err.message}`));
-  await bot.start({ onStart: () => setBotRunning(true) });
+  try {
+    await bot.start({ onStart: () => setBotRunning(true) });
+  } catch (err) {
+    // 409 = another process is already polling this bot token (a second `bot`, or the
+    // Claude Code Telegram plugin on the same bot). Two pollers keep kicking each other off.
+    if ((err as { error_code?: number }).error_code === 409) {
+      console.error(
+        "[bot] Этот Telegram-токен уже опрашивает другой процесс: второй `node dist/cli.js bot` " +
+          "или Telegram-плагин Claude Code на том же боте. У каждого должен быть свой бот — " +
+          "проверь TELEGRAM_BOT_TOKEN в .env.",
+      );
+      process.exit(1);
+    }
+    throw err;
+  }
 }
