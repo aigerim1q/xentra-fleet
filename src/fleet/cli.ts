@@ -6,12 +6,13 @@ import { Spool, archive, readInbox, send, thread, type Priority } from "./mail.j
 import { OWNER_ADDRESS, loadRoles } from "./roles.js";
 import { runRoleSession } from "./session.js";
 import { FLEET_ADDRESS, Supervisor } from "./supervisor.js";
+import { FleetLimits } from "./limits.js";
 import { commitWorkspace, ensureWorkspace, fleetHome, runWorkspaceGates, type RepoTarget } from "./workspace.js";
 
 // `fleet …` commands: the supervisor (`run`, `once`), the owner's mailbox from the
 // terminal, echo holds and the role list.
 
-async function buildSupervisor(log: (l: string) => void): Promise<Supervisor> {
+async function buildSupervisor(log: (l: string) => void, opts: { limits: boolean } = { limits: true }): Promise<Supervisor> {
   const repo = (kind: RepoTarget["kind"]): RepoTarget | undefined => {
     const r = config.repos[kind];
     return r.path ? { kind, path: r.path, baseBranch: config.gitlab.targetBranch, gates: r.gates } : undefined;
@@ -24,6 +25,7 @@ async function buildSupervisor(log: (l: string) => void): Promise<Supervisor> {
     runSession: runRoleSession,
     workspace: { ensure: ensureWorkspace, commit: commitWorkspace, gates: runWorkspaceGates },
     log,
+    limits: opts.limits ? new FleetLimits(join(fleetHome(), "state")) : undefined,
   });
 }
 

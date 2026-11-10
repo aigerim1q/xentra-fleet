@@ -5,6 +5,7 @@ import { isHeld, placeHold, quarantine, recentRoleLetters, shouldHold } from "./
 import { ack, archive, readInbox, send, thread as threadLetters, type Letter, type Spool } from "./mail.js";
 import { OWNER_ADDRESS, senderAllowed, type Role } from "./roles.js";
 import type { SessionRunner } from "./session.js";
+import type { FleetLimits } from "./limits.js";
 import type { RepoTarget } from "./workspace.js";
 
 // One supervisor process for the whole fleet (the CTO fleet runs one runner per role
@@ -35,10 +36,13 @@ export interface SupervisorOptions {
   workspace: WorkspaceOps;
   log?: (line: string) => void;
   pollMs?: number;
+  // Start gate (pause, daily caps, override). Absent = no limits (tests, `fleet once`).
+  limits?: FleetLimits;
 }
 
 export class Supervisor {
   private busyRoles = new Set<string>();
+  private lastBlock = new Map<string, string>();
   private busyThreads = new Set<string>();
   private running = new Set<Promise<void>>();
   private timer?: NodeJS.Timeout;
@@ -94,6 +98,14 @@ export class Supervisor {
       if (this.busyRoles.has(role.role)) continue;
       const batch = this.prepare(role);
       if (!batch) continue;
+      const blocked = this.o.limits?.blockReason(role);
+      if (blocked) {
+        // Letters wait in the Inbox; no attempt is counted. Logged once per reason.
+        if (this.lastBlock.get(role.role) !== blocked) this.log(`${role.role}: waiting — ${blocked}`);
+        this.lastBlock.set(role.role, blocked);
+        continue;
+      }
+      this.lastBlock.delete(role.role);
       this.busyRoles.add(role.role);
       this.busyThreads.add(batch.thread);
       const p = this.handle(role, batch)
@@ -148,7 +160,16 @@ export class Supervisor {
 
     const cwd = await this.o.workspace.ensure(repo, batch.thread, { baselines: role.access === "edit" });
     const history = threadLetters(spool, batch.thread).filter((l) => !l.kind && !letters.some((x) => x.id === l.id));
-    const outcome = await this.o.runSession({ role, batch, cwd, stateDir: this.o.stateDir, history });
+    const runningFile = join(this.o.stateDir, `running.${role.role}`);
+    mkdirSync(this.o.stateDir, { recursive: true });
+    writeFileSync(runningFile, JSON.stringify({ thread: batch.thread, primary: batch.primary.id, startedAt: new Date().toISOString() }));
+    let outcome;
+    try {
+      outcome = await this.o.runSession({ role, batch, cwd, stateDir: this.o.stateDir, history });
+    } finally {
+      rmSync(runningFile, { force: true });
+    }
+    this.o.limits?.record(role.engine, outcome.costUsd);
 
     // Deliver what the role asked for. A bad block fails alone and is reported back.
     const answered = new Set<string>();

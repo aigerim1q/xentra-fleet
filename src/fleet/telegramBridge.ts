@@ -6,6 +6,8 @@ import { Spool, archive, findInInbox, readInbox, send, type Letter } from "./mai
 import { OWNER_ADDRESS, loadRoles } from "./roles.js";
 import { FLEET_ADDRESS } from "./supervisor.js";
 import { fleetHome } from "./workspace.js";
+import { FleetLimits } from "./limits.js";
+import { existsSync, readdirSync } from "node:fs";
 
 // The owner is a mailbox (xentra/owner) the fleet writes to; this bridge makes that
 // mailbox live in Telegram, as the CTO is the human end of his fleet:
@@ -115,6 +117,66 @@ export function installOwnerBridge(bot: Bot, chatId: number, opts: { pollMs?: nu
     const key = /\b([A-Z][A-Z0-9]+-\d+)\b/.exec(text)?.[1];
     const l = send(spool, { from: OWNER_ADDRESS, to: ["xentra/pm"], subject, body: text, key });
     await ctx.reply(`📨 Отправил pm, тред ${l.thread}`);
+  });
+
+  const limits = new FleetLimits(join(fleetHome(), "state"));
+  const roleNames = loadRoles().map((r) => r.role);
+  const roleArg = (ctx: Context): string | undefined | null => {
+    const r = ctx.match?.toString().trim();
+    if (!r) return undefined;
+    return roleNames.includes(r) ? r : null;
+  };
+
+  bot.command("fleet_status", async (ctx) => {
+    const stateDir = join(fleetHome(), "state");
+    const running = existsSync(stateDir)
+      ? readdirSync(stateDir)
+          .filter((f) => f.startsWith("running."))
+          .map((f) => {
+            try {
+              const r = JSON.parse(readFileSync(join(stateDir, f), "utf8"));
+              return `▶️ ${f.slice(8)} — тред ${r.thread} с ${String(r.startedAt).slice(11, 16)}`;
+            } catch {
+              return `▶️ ${f.slice(8)}`;
+            }
+          })
+      : [];
+    const queue = loadRoles()
+      .map((r) => [r.role, readInbox(spool, r.mail).filter((l) => !l.kind).length] as const)
+      .filter(([, n]) => n > 0)
+      .map(([r, n]) => `📥 ${r}: ${n}`);
+    const holds = listHolds(spool);
+    await ctx.reply(
+      [
+        "Флот ролей",
+        limits.summary(),
+        "",
+        running.length ? running.join("\n") : "Сейчас никто не работает.",
+        queue.length ? queue.join("\n") : "Очереди пусты.",
+        holds.length ? `⛔ Остановлены треды: ${holds.join(", ")}` : "",
+        "",
+        "/fleet_pause [роль] · /fleet_resume [роль] · /fleet_override",
+      ].filter((x, i, a) => x !== "" || a[i - 1] !== "").join("\n"),
+    );
+  });
+
+  bot.command("fleet_pause", async (ctx) => {
+    const r = roleArg(ctx);
+    if (r === null) return void (await ctx.reply(`Нет такой роли. Роли: ${roleNames.join(", ")}`));
+    limits.pause(r);
+    await ctx.reply(r ? `⏸ ${r} на паузе: новые сессии не стартуют, идущая доработает.` : "⏸ Флот на паузе: новые сессии не стартуют, идущие доработают.");
+  });
+
+  bot.command("fleet_resume", async (ctx) => {
+    const r = roleArg(ctx);
+    if (r === null) return void (await ctx.reply(`Нет такой роли. Роли: ${roleNames.join(", ")}`));
+    limits.resume(r);
+    await ctx.reply(r ? `▶️ ${r} снова работает.` : "▶️ Флот снова работает.");
+  });
+
+  bot.command("fleet_override", async (ctx) => {
+    limits.overrideToday();
+    await ctx.reply("⚡️ Дневные лимиты сняты до конца дня. Пауза, если стоит, остаётся.");
   });
 
   bot.command("holds", async (ctx) => {
