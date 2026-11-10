@@ -71,7 +71,7 @@ test("supervisor injects memory into the next session and writes the role's memo
       roles: [role],
       repos: { backend: { kind: "backend", path: "/r", baseBranch: "dev", gates: [] }, frontend: undefined },
       stateDir,
-      workspace: { ensure: async () => dir, commit: async () => false, gates: async () => ({ passed: true, output: "", gates: [] }), diffStat: async () => "" },
+      workspace: { ensure: async () => dir, commit: async () => false, gates: async () => ({ passed: true, output: "", gates: [] }), diffStat: async () => "", headSha: async () => "sha1" },
       runSession: async (i) => {
         inputs.push(i);
         n++;

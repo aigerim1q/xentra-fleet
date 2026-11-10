@@ -11,7 +11,9 @@ import { pollCi, pollJira, type WatcherDeps } from "./watchers.js";
 import { JiraClient } from "../jira/client.js";
 import { getFailedJobs, getMergeRequestPipeline } from "../gitlab.js";
 import { secretValues } from "../config.js";
-import { commitWorkspace, ensureWorkspace, fleetHome, runWorkspaceGates, workspaceDiff, type RepoTarget } from "./workspace.js";
+import { commitWorkspace, ensureWorkspace, fleetHome, runWorkspaceGates, workspaceDiff, workspaceHead, type RepoTarget } from "./workspace.js";
+import { mergeModeFromEnv, pollMerges } from "./mergeBot.js";
+import { mergeMergeRequest } from "../gitlab.js";
 
 // `fleet …` commands: the supervisor (`run`, `once`), the owner's mailbox from the
 // terminal, echo holds and the role list.
@@ -29,7 +31,7 @@ async function buildSupervisor(log: (l: string) => void, opts: { limits: boolean
     repos: { backend: repo("backend"), frontend: repo("frontend") },
     stateDir: join(fleetHome(), "state"),
     runSession: runRoleSession,
-    workspace: { ensure: ensureWorkspace, commit: commitWorkspace, gates: runWorkspaceGates, diffStat: workspaceDiff },
+    workspace: { ensure: ensureWorkspace, commit: commitWorkspace, gates: runWorkspaceGates, diffStat: workspaceDiff, headSha: workspaceHead },
     log,
     limits: opts.limits ? new FleetLimits(join(fleetHome(), "state")) : undefined,
   });
@@ -67,9 +69,28 @@ function startWatchers(log: (l: string) => void): () => void {
     await pollJira(spool, stateDir, deps).catch((e) => log(`[fleet] jira-watch: ${(e as Error).message}`));
     jiraBusy = false;
   }, Number(process.env.FLEET_JIRA_POLL_MS ?? 300_000));
+  const mode = mergeModeFromEnv();
+  const auditors = loadRoles().filter((r) => r.isAuditor).map((r) => r.role);
+  let mergeBusy = false;
+  const merge =
+    mode === "off"
+      ? undefined
+      : setInterval(async () => {
+          if (mergeBusy) return;
+          mergeBusy = true;
+          await pollMerges(spool, stateDir, mode, auditors, {
+            pipeline: deps.pipeline,
+            merge: (projectPath, iid, sha) =>
+              mergeMergeRequest({ gitlabBaseUrl: config.gitlab.baseUrl, token: config.gitlab.token, projectPath, iid, sha }),
+            log: (l) => log(`[fleet] ${l}`),
+          }).catch((e) => log(`[fleet] merge-bot: ${(e as Error).message}`));
+          mergeBusy = false;
+        }, Number(process.env.FLEET_MERGE_POLL_MS ?? 300_000));
+  log(`[fleet] merge bot: ${mode}${mode === "off" ? "" : ` (auditors: ${auditors.join(", ")})`}`);
   return () => {
     clearInterval(ci);
     clearInterval(jira);
+    clearInterval(merge);
   };
 }
 

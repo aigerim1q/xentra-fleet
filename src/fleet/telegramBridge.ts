@@ -9,7 +9,8 @@ import { fleetHome } from "./workspace.js";
 import { FleetLimits } from "./limits.js";
 import { WATCHER_ADDRESSES } from "./watchers.js";
 import { approvePush, declinePush, loadPush, type PushDeps } from "./pushRequests.js";
-import { createMergeRequest, pushBranch } from "../gitlab.js";
+import { createMergeRequest, getMergeRequestPipeline, mergeMergeRequest, pushBranch } from "../gitlab.js";
+import { checkReadiness, setVeto, type MergeDeps } from "./mergeBot.js";
 import { config } from "../config.js";
 import { existsSync, readdirSync } from "node:fs";
 
@@ -101,7 +102,16 @@ function spoolWithMailboxes(): Spool {
   return spool;
 }
 
-export function installOwnerBridge(bot: Bot, chatId: number, opts: { pollMs?: number; pushDeps?: PushDeps } = {}): () => void {
+export const realMergeDeps: MergeDeps = {
+  pipeline: (projectPath, iid) => getMergeRequestPipeline({ gitlabBaseUrl: config.gitlab.baseUrl, token: config.gitlab.token, projectPath, iid }),
+  merge: (projectPath, iid, sha) => mergeMergeRequest({ gitlabBaseUrl: config.gitlab.baseUrl, token: config.gitlab.token, projectPath, iid, sha }),
+};
+
+export function installOwnerBridge(
+  bot: Bot,
+  chatId: number,
+  opts: { pollMs?: number; pushDeps?: PushDeps; mergeDeps?: MergeDeps } = {},
+): () => void {
   const spool = spoolWithMailboxes();
   const st = loadState();
   const stateDir = join(fleetHome(), "state");
@@ -120,6 +130,9 @@ export function installOwnerBridge(bot: Bot, chatId: number, opts: { pollMs?: nu
       if (l.from === FLEET_ADDRESS && l.subject.startsWith("Запрос на push") && loadPush(stateDir, l.thread)?.status === "pending") {
         const t = tokenFor(l.thread);
         kb.text("🚀 Push и MR", `fleet_push:${t}`).text("✋ Не сейчас", `fleet_nopush:${t}`).row();
+      }
+      if (l.from === FLEET_ADDRESS && l.subject.startsWith("Готово к мержу") && loadPush(stateDir, l.thread)?.mr) {
+        kb.text("🔀 Смержить", `fleet_merge:${tokenFor(l.thread)}`).row();
       }
       kb.text("✅ Прочитано", `fleet_read:${l.id}`);
       try {
@@ -169,6 +182,43 @@ export function installOwnerBridge(bot: Bot, chatId: number, opts: { pollMs?: nu
     } catch (err) {
       await ctx.reply(`Не выполнено: ${(err as Error).message}`);
     }
+  });
+
+  bot.callbackQuery(/^fleet_merge:(\d+)$/, async (ctx) => {
+    const thread = st.tokens?.[ctx.match[1]];
+    const p = thread ? loadPush(stateDir, thread) : undefined;
+    if (!thread || !p?.mr) return void (await ctx.answerCallbackQuery({ text: "Запрос устарел", show_alert: true }));
+    await ctx.answerCallbackQuery({ text: "Проверяю и мержу…" });
+    const deps = opts.mergeDeps ?? realMergeDeps;
+    try {
+      // Re-checked at click time: CI, verdicts or the head may have changed since the letter.
+      const auditors = loadRoles().filter((r) => r.isAuditor).map((r) => r.role);
+      const r = checkReadiness(stateDir, p, await deps.pipeline(p.gitlabProjectPath, p.mr.iid), auditors);
+      if (!r.ready || !r.sha) {
+        await ctx.reply(`Не мержу: ${r.reasons.join("; ")}`);
+        return;
+      }
+      await deps.merge(p.gitlabProjectPath, p.mr.iid, r.sha);
+      await ctx.editMessageReplyMarkup({ reply_markup: undefined }).catch(() => {});
+      await ctx.reply(`🔀 Смержено: ${p.mr.webUrl}`);
+      notifyRequester(thread, p.requestedBy, "Смержено", `Владелец смержил MR !${p.mr.iid}. ${p.mr.webUrl}`);
+    } catch (err) {
+      await ctx.reply(`Мерж не удался: ${(err as Error).message}`);
+    }
+  });
+
+  bot.command("veto", async (ctx) => {
+    const t = ctx.match?.toString().trim();
+    if (!t) return void (await ctx.reply("Укажи тред: /veto <тред>"));
+    setVeto(stateDir, t, true);
+    await ctx.reply(`⛔ Вето на мерж треда ${t}. Снять — /unveto ${t}`);
+  });
+
+  bot.command("unveto", async (ctx) => {
+    const t = ctx.match?.toString().trim();
+    if (!t) return void (await ctx.reply("Укажи тред: /unveto <тред>"));
+    setVeto(stateDir, t, false);
+    await ctx.reply(`Вето с треда ${t} снято.`);
   });
 
   bot.callbackQuery(/^fleet_nopush:(\d+)$/, async (ctx) => {

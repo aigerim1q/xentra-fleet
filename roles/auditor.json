@@ -7,5 +7,6 @@
   "sessionTimeout": "2h",
   "description": "Аудитор: независимое ревью изменений треда.",
   "defaultRepo": "backend",
-  "acceptFrom": []
+  "acceptFrom": [],
+  "auditor": true
 }

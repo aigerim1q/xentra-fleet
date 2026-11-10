@@ -108,3 +108,8 @@ export async function workspaceDiff(dir: string, baseBranch: string): Promise<st
   }));
   return stdout.trim();
 }
+
+export async function workspaceHead(dir: string): Promise<string> {
+  const { stdout } = await execFileAsync("git", ["rev-parse", "HEAD"], { cwd: dir });
+  return stdout.trim();
+}

@@ -71,7 +71,7 @@ test("only pm may request a push; the request goes to the owner with the diffsta
       roles: [pm, dev],
       repos: { backend: { kind: "backend", path: "/r", baseBranch: "dev", gates: [], gitlabProjectPath: "saqr/back-ai" }, frontend: undefined },
       stateDir,
-      workspace: { ensure: async () => "/wt", commit: async () => false, gates: async () => ({ passed: true, output: "", gates: [] }), diffStat: async () => " a.ts | 1 +" },
+      workspace: { ensure: async () => "/wt", commit: async () => false, gates: async () => ({ passed: true, output: "", gates: [] }), diffStat: async () => " a.ts | 1 +", headSha: async () => "sha1" },
       runSession: async (i) => {
         const t = `<push title="XEN-1"/><ack id="${i.batch.primary.id}"/>`;
         return { ok: true, actions: parseReplyActions(t), resultText: t, costUsd: 0 };

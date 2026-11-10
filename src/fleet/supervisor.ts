@@ -10,6 +10,7 @@ import { appendMemory, memoryPromptBlock } from "./memory.js";
 import { branchFor } from "./workspace.js";
 import { fileRequest, loadPush } from "./pushRequests.js";
 import { WATCHER_ADDRESSES, addCiWatch } from "./watchers.js";
+import { recordVerdict } from "./mergeBot.js";
 import type { RepoTarget } from "./workspace.js";
 
 // One supervisor process for the whole fleet (the CTO fleet runs one runner per role
@@ -30,6 +31,7 @@ export interface WorkspaceOps {
   commit(dir: string, message: string): Promise<boolean>;
   gates(repo: RepoTarget, dir: string): Promise<{ passed: boolean; output: string; gates: Array<{ name: string; passed: boolean }> }>;
   diffStat(dir: string, baseBranch: string): Promise<string>;
+  headSha(dir: string): Promise<string>;
 }
 
 export interface SupervisorOptions {
@@ -246,6 +248,12 @@ export class Supervisor {
         thread: batch.thread,
         repo: batch.repo,
       });
+    }
+
+    if (role.isAuditor && outcome.ok) {
+      const sha = await this.o.workspace.headSha(cwd).catch(() => "");
+      const v = sha ? recordVerdict(this.o.stateDir, batch.thread, role.role, sha, outcome.resultText) : undefined;
+      if (v) this.log(`${role.role}: verdict on ${sha.slice(0, 8)} — ${v.blocking ? "blocking" : "clear"}`);
     }
 
     if (outcome.actions.watchCi) {

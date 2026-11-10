@@ -151,3 +151,14 @@ export function cleanJobTrace(trace: string): string {
   if (cleanup > 0) t = t.slice(0, cleanup);
   return t.replace(/\n{3,}/g, "\n\n").trimEnd();
 }
+
+// Merge pinned to the checked head sha: GitLab refuses if the branch moved since.
+export async function mergeMergeRequest(opts: { gitlabBaseUrl: string; token: string; projectPath: string; iid: number; sha: string }): Promise<void> {
+  const p = encodeURIComponent(opts.projectPath);
+  const res = await fetch(`${opts.gitlabBaseUrl}/api/v4/projects/${p}/merge_requests/${opts.iid}/merge`, {
+    method: "PUT",
+    headers: { "PRIVATE-TOKEN": opts.token, "Content-Type": "application/json" },
+    body: JSON.stringify({ sha: opts.sha, should_remove_source_branch: true }),
+  });
+  if (!res.ok) throw new Error(`GitLab merge ${res.status}`);
+}

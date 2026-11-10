@@ -23,6 +23,8 @@ export interface Role {
   acceptFrom: string[];
   // May ask the owner to push the thread branch and open an MR (<push/>).
   canRequestPush: boolean;
+  // Its БЛОКИРУЮЩИЕ/ЗАМЕЧАНИЯ verdict counts for the merge bot (fleet/mergeBot.ts).
+  isAuditor: boolean;
   description: string;
   instructions: string;
 }
@@ -65,6 +67,7 @@ export function parseRole(raw: unknown, instructions: string): Role {
     defaultRepo,
     acceptFrom,
     canRequestPush: r.canRequestPush === true,
+    isAuditor: r.auditor === true,
     description: typeof r.description === "string" ? r.description : "",
     instructions,
   };
