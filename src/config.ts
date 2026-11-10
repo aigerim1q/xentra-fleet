@@ -192,6 +192,8 @@ export const config = {
   agentIdleTimeoutMs: Number(process.env.AGENT_IDLE_TIMEOUT_MS ?? 30 * 60 * 1000),
   agentTurnTimeoutMs: Number(process.env.AGENT_TURN_TIMEOUT_MS ?? 5 * 60 * 60 * 1000),
   // Session journals (engine/sessionLog.ts) older than this are deleted at bot start; 0 keeps them.
+  // Forward the role fleet's owner mailbox (xentra/owner) into Telegram — fleet/telegramBridge.ts.
+  fleetBridgeEnabled: (process.env.FLEET_BRIDGE_ENABLED ?? "true") !== "false",
   sessionLogRetentionDays: Number(process.env.SESSION_LOG_RETENTION_DAYS ?? 14),
   maxIterations: Number(process.env.MAX_ITERATIONS ?? 5),
   maxBudgetUsd: Number(process.env.MAX_BUDGET_USD ?? 5),

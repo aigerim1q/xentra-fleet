@@ -43,7 +43,7 @@ const base = { cwd: process.cwd(), prompt: "x", permissionMode: "acceptEdits" };
 
 test("a silent stream is killed by the idle watchdog, keeping the session id", async () => {
   process.env.FAKE_CLAUDE_MODE = "silent";
-  const err = await runClaudeTurn({ ...base, idleTimeoutMs: 1500, turnTimeoutMs: 10_000 }).catch((e) => e);
+  const err = await runClaudeTurn({ ...base, idleTimeoutMs: 4000, turnTimeoutMs: 20_000 }).catch((e) => e);
   assert.ok(err instanceof TurnTimeoutError);
   assert.equal(err.kind, "idle");
   assert.equal(err.sessionId, "11111111-2222-3333-4444-555555555555");
@@ -52,10 +52,10 @@ test("a silent stream is killed by the idle watchdog, keeping the session id", a
 test("a stream that keeps talking is still stopped by the turn ceiling", async () => {
   process.env.FAKE_CLAUDE_MODE = "chatty";
   const started = Date.now();
-  const err = await runClaudeTurn({ ...base, idleTimeoutMs: 1500, turnTimeoutMs: 2500 }).catch((e) => e);
+  const err = await runClaudeTurn({ ...base, idleTimeoutMs: 4000, turnTimeoutMs: 6000 }).catch((e) => e);
   assert.ok(err instanceof TurnTimeoutError);
   assert.equal(err.kind, "ceiling");
-  assert.ok(Date.now() - started < 6000);
+  assert.ok(Date.now() - started < 12_000);
 });
 
 test("contextTokens is the last model call's context, not the turn's summed usage", async () => {

@@ -42,6 +42,7 @@ import {
 } from "../queue.js";
 import { killCurrentTurn, runClaudeTurn } from "../engine/claudeEngine.js";
 import { killCodexReview } from "../engine/codexReview.js";
+import { installOwnerBridge } from "../fleet/telegramBridge.js";
 
 /** Chat must be allowlisted; when TELEGRAM_ALLOWED_USER_IDS is set, the sender too. */
 export function isAuthorizedSender(
@@ -83,6 +84,8 @@ const HELP_TEXT = [
   "«нужен человек» — сразу присылаю diff с кнопками ✅ Принять/❌ Отклонить: можно запушить уже сделанную работу вручную, даже если сам я сдался",
   "брифы — если разработчику что-то реально неясно, не додумывает: присылаю вопрос с вариантами, выбираешь кнопкой, он продолжает с тем же контекстом",
   "/dashboard — ссылка на живой локальный дашборд",
+  "/fleet <задача> — поставить задачу флоту ролей (письмо pm); письма флота мне приходят сюда, ответ — реплаем",
+  "/holds, /release <тред> — треды, остановленные защитой от зацикливания",
   "/help — это сообщение",
   "",
   "Можешь просто написать мне, без команды — отвечу или сделаю то, что просишь, если это похоже на одну из команд выше.",
@@ -379,6 +382,11 @@ export async function startBot(): Promise<void> {
     }
     await next();
   });
+
+  // The role fleet's owner mailbox lives in this chat (fleet/telegramBridge.ts). Installed
+  // AFTER the access guard above (its commands and replies must be owner-only) and before
+  // the free-text handler below: it takes only replies to forwarded letters.
+  if (config.fleetBridgeEnabled) installOwnerBridge(bot, Number(announceChatId));
 
   function menuLine(c: Candidate): string {
     return `${statusTag(c.issue.status)} ${c.issue.key}: ${c.issue.summary}`;
