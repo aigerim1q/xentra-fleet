@@ -15,6 +15,7 @@ import { commitWorkspace, ensureWorkspace, fleetHome, runWorkspaceGates, workspa
 import { mergeModeFromEnv, pollMerges } from "./mergeBot.js";
 import { computeMetrics, formatMetrics } from "./metrics.js";
 import { DEPUTY_THREAD, fleetSnapshot } from "./deputy.js";
+import { fleetAlive, roleName, threadTitle } from "./names.js";
 import { mergeMergeRequest } from "../gitlab.js";
 
 // `fleet …` commands: the supervisor (`run`, `once`), the owner's mailbox from the
@@ -199,6 +200,21 @@ export function registerFleetCommands(program: Command): void {
   hold.command("release <thread>").action((t: string) => {
     console.log(releaseHold(new Spool(), t) ? `released ${t}` : `${t} was not on hold`);
   });
+
+  fleet
+    .command("status")
+    .description("Snapshot of the team: who works on what, queues, pending decisions, the week's threads")
+    .action(() => {
+      const spool = new Spool();
+      const stateDir = join(fleetHome(), "state");
+      const alive = fleetAlive(stateDir);
+      console.log(`Команда: ${alive ? "запущена" : "НЕ запущена (node dist/cli.js fleet run)"}`);
+      console.log(new FleetLimits(stateDir).summary());
+      console.log(fleetSnapshot(spool, stateDir, loadRoles()).replace(/^## .*\n/, ""));
+      const owner = readInbox(spool, OWNER_ADDRESS).filter((l) => !l.kind);
+      console.log(`\nПисем владельцу без ответа: ${owner.length}`);
+      for (const l of owner) console.log(`- ${l.id}  ${roleName(l.from)} · ${threadTitle(spool, l.thread)} · «${l.subject}»`);
+    });
 
   fleet
     .command("metrics")

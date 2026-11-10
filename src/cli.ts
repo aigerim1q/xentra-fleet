@@ -269,6 +269,30 @@ program
     await new Promise((r) => child.on("close", r));
   });
 
+program
+  .command("cto")
+  .description("Open your standing CTO console: one Claude Code session that knows the fleet")
+  .option("--new", "start a fresh conversation instead of continuing the last one")
+  .action(async (o) => {
+    const { spawn } = await import("node:child_process");
+    const { prepareCtoWorkspace } = await import("./cto.js");
+    const { dir, resume } = prepareCtoWorkspace();
+    const cont = resume && !o.new;
+    console.log(`Консоль CTO: ${dir} — ${cont ? "продолжаю прошлый разговор" : "новый разговор"}. Выход — /exit.`);
+    const child = spawn("claude", cont ? ["--continue"] : [], { cwd: dir, stdio: "inherit" });
+    await new Promise((r) => child.on("close", r));
+  });
+
+program
+  .command("cto-statusline", { hidden: true })
+  .description("Status line for the CTO console (reads Claude Code's status JSON on stdin)")
+  .action(async () => {
+    const { ctoStatusLine } = await import("./ctoStatus.js");
+    let input = "";
+    for await (const chunk of process.stdin) input += chunk;
+    process.stdout.write(ctoStatusLine(input));
+  });
+
 registerFleetCommands(program);
 
 program.parseAsync(process.argv);
