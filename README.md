@@ -124,6 +124,31 @@ node dist/cli.js fleet run  # супервизор флота ролей (отд
 Перед стартом PM и разработчик получают справку без участия модели: карточку Jira,
 последние комментарии, MR задачи и статус пайплайна.
 
+## Смотреть за агентами
+
+```bash
+node dist/cli.js watch -f                  # все агенты вживую: что читают, правят, пишут
+node dist/cli.js watch -f --task XEN-55    # одна задача (или fleet-<тред> для флота)
+node dist/cli.js watch --role dev-1        # последние сессии одной роли
+node dist/cli.js watch --list              # сессии с командой, чтобы открыть их в Claude Code
+```
+
+```
+[XEN-55 dev] ▶ сессия 099500e0 · claude-sonnet-5-5
+[XEN-55 dev] → Поиск по коду: "archived"
+[XEN-55 dev] → Правка src/modules/documents/documents.service.ts
+[XEN-55 dev] 💬 Фильтр не учитывал архивные записи, добавил условие…
+[XEN-55 dev] ■ готово · ~$0.42 · 184 с · 23 ходов
+```
+
+Открыть сессию агента целиком в Claude Code — командой из `watch --list`:
+`cd <папка> && claude --resume <id> --fork-session`. `--fork-session` обязателен: без него
+твои сообщения попадут в сессию, которую агент продолжит, и собьют ему контекст.
+
+Сырые журналы (`.jsonl`, секреты замаскированы): `.harness-state/tasks/<KEY>/sessions/` для
+конвейера, `~/.xentra-fleet/state/tasks/fleet-<тред>/sessions/` для флота. Состояние флота —
+`node dist/cli.js fleet mail thread <тред>` и `/fleet_status` в Telegram.
+
 ## Настройка
 
 Все параметры — в `.env.example`, с комментариями. Главное:

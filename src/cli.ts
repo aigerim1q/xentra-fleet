@@ -212,6 +212,33 @@ program
     console.log(`\n${opts.dryRun ? "Подошло" : "Новых кейсов"}: ${made} из ${issues.length} просмотренных.`);
   });
 
+program
+  .command("watch")
+  .description("Show agent sessions in a readable form: what they read, edit and say (live with -f)")
+  .option("-f, --follow", "keep printing new activity")
+  .option("--task <key>", "only this task (XEN-55) or fleet thread")
+  .option("--role <role>", "only this role (dev, pm, reviewer, dev-1, auditor, …)")
+  .option("--tail <n>", "how many recent sessions to print first", "3")
+  .option("--list", "list recent sessions with their id and folder, to open one in Claude Code")
+  .action(async (o) => {
+    const { join } = await import("node:path");
+    const { HARNESS_STATE_DIR } = await import("./bot/liveState.js");
+    const { fleetHome } = await import("./fleet/workspace.js");
+    const { listJournals, matches, sessionInfo, watchJournals } = await import("./engine/sessionView.js");
+    const dirs = [HARNESS_STATE_DIR, join(fleetHome(), "state")];
+    if (o.list) {
+      const rows = listJournals(dirs).filter((j) => matches(j, o)).slice(-Number(o.tail === "3" ? 15 : o.tail));
+      if (rows.length === 0) console.log("(сессий пока нет)");
+      for (const j of rows) {
+        const s = sessionInfo(j.path);
+        console.log(`${new Date(j.mtimeMs).toLocaleString("ru-RU")}  ${j.task}  ${j.label}  ${s.model ?? ""}`);
+        if (s.sessionId && s.cwd) console.log(`   cd ${s.cwd} && claude --resume ${s.sessionId} --fork-session`);
+      }
+      return;
+    }
+    watchJournals(dirs, { task: o.task, role: o.role, tail: Number(o.tail), follow: !!o.follow });
+  });
+
 registerFleetCommands(program);
 
 program.parseAsync(process.argv);

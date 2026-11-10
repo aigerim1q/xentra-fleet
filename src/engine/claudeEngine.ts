@@ -80,7 +80,7 @@ function truncate(s: string, n: number): string {
   return s.length > n ? s.slice(0, n) + "…" : s;
 }
 
-function summarizeToolUse(name: string, input: Record<string, unknown>): string {
+export function summarizeToolUse(name: string, input: Record<string, unknown>): string {
   const path = (input.file_path as string) ?? (input.path as string);
   switch (name) {
     case "Read":
