@@ -634,6 +634,12 @@ async function closeLoopAndPush(
       reason = `review_blocked${rounds}: ${blocking.map((f) => f.description).join("; ")}`;
     } else if (result.stopReason === "gate_integrity_violation" && result.gateIntegrityViolations?.length) {
       reason = `gate_integrity_violation: ${result.gateIntegrityViolations.join("; ")}`;
+    } else if (result.stopReason === "turn_timeout" && result.turnTimeout) {
+      const t = result.turnTimeout;
+      const why = t.kind === "idle" ? "agent stream silent" : "turn ran past its time ceiling";
+      reason =
+        `turn_timeout: ${why} for ${Math.round(t.afterMs / 60000)} min, session killed` +
+        (t.checkpointCommitted ? "; unfinished edits saved as a wip: checkpoint commit in the worktree" : "; no unfinished edits");
     } else if (result.stopReason === "context_budget" && result.contextTokens) {
       reason = `context_budget: session reached ~${Math.round(result.contextTokens / 1000)}k tokens, stopped before quality degrades further`;
     } else if (result.stopReason === "rebase_conflict" && result.rebaseConflictOutput) {

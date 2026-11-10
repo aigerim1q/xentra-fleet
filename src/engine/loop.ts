@@ -1,4 +1,5 @@
 import type {
+  ClaudeTurnResult,
   ClaudeTurnUsage,
   CloseLoopIteration,
   CloseLoopResult,
@@ -8,7 +9,7 @@ import type {
   ReviewFinding,
   TaskSpec,
 } from "../types.js";
-import { runClaudeTurn } from "./claudeEngine.js";
+import { runClaudeTurn, TurnTimeoutError } from "./claudeEngine.js";
 import { establishBaselines, runGates } from "./verify.js";
 import {
   buildHandoffContinuationPrompt,
@@ -500,16 +501,41 @@ export async function runCloseLoop(task: TaskSpec, config: EngineConfig): Promis
       return { task, success: false, iterations, totalCostUsd, stopReason: "max_budget", worktreeDir, acceptanceTestPath };
     }
 
-    const turn = await runClaudeTurn({
-      cwd: worktreeDir,
-      prompt,
-      permissionMode: config.permissionMode,
-      resumeSessionId,
-      maxBudgetUsd: remainingBudget,
-      extraDeniedPaths,
-      model: config.model,
-      onLog: config.onLog,
-    });
+    let turn: ClaudeTurnResult;
+    try {
+      turn = await runClaudeTurn({
+        cwd: worktreeDir,
+        prompt,
+        permissionMode: config.permissionMode,
+        resumeSessionId,
+        maxBudgetUsd: remainingBudget,
+        extraDeniedPaths,
+        model: config.model,
+        onLog: config.onLog,
+      });
+    } catch (err) {
+      if (!(err instanceof TurnTimeoutError)) throw err;
+      // As in the CTO fleet: whatever the killed session had edited is saved as a WIP
+      // checkpoint commit before anyone touches the worktree, then a human decides.
+      const checkpointCommitted = await commitAll(
+        worktreeDir,
+        `wip: checkpoint ${task.id} (turn stopped by ${err.kind === "idle" ? "idle watchdog" : "time ceiling"})\n\nAutomated by jira-harness.`,
+      ).catch(() => false);
+      config.onLog?.(
+        `⏱ Ход остановлен: ${err.kind === "idle" ? "агент молчал" : "превышен лимит времени"} ${Math.round(err.afterMs / 60000)} мин` +
+          (checkpointCommitted ? " — незаконченные правки сохранены WIP-коммитом." : "."),
+      );
+      return {
+        task,
+        success: false,
+        iterations,
+        totalCostUsd,
+        stopReason: "turn_timeout",
+        worktreeDir,
+        acceptanceTestPath,
+        turnTimeout: { kind: err.kind, afterMs: err.afterMs, checkpointCommitted },
+      };
+    }
     totalCostUsd += turn.totalCostUsd;
     resumeSessionId = turn.sessionId;
     config.onIteration?.({ iteration: i + 1, phase: "iterating", costUsd: totalCostUsd, summary: turn.resultText.slice(0, 200) });
@@ -568,7 +594,9 @@ export async function runCloseLoop(task: TaskSpec, config: EngineConfig): Promis
     // the current diff instead of `--resume`'s conversation history — a real, known
     // tradeoff (that session won't know what this one already tried), which is exactly
     // why it's never automatic.
-    const contextTokens = totalContextTokens(turn.usage);
+    // The last model call's context, not turn.usage (that one is summed over every call
+    // in the turn and overstates the context many times over on a tool-heavy turn).
+    const contextTokens = turn.contextTokens;
     if (shouldHandOff(contextTokens, handoffsUsed, config.handoff) && config.handoff) {
       const failedNow = verify.gates.filter((g) => !g.passed);
       const handoffNumber = handoffsUsed + 1;

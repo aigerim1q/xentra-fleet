@@ -230,7 +230,11 @@ export interface ClaudeTurnResult {
   isError: boolean;
   terminalReason: string;
   totalCostUsd: number;
+  // Summed over every model call in the turn — NOT the context size.
   usage: ClaudeTurnUsage;
+  // The real context the model saw: input + cache tokens of the turn's LAST model call.
+  // 0 when the stream carried no assistant usage.
+  contextTokens: number;
 }
 
 export interface VerifyResult {
@@ -293,6 +297,7 @@ export interface CloseLoopResult {
     | "max_iterations"
     | "max_budget"
     | "context_budget"
+    | "turn_timeout"
     | "agent_error"
     | "stuck"
     | "review_blocked"
@@ -344,6 +349,9 @@ export interface CloseLoopResult {
   // cache_creation token count that tripped maxContextTokens, for the needs_human
   // reason text.
   contextTokens?: number;
+  // Set only when stopReason is "turn_timeout": which bound killed the implement turn,
+  // and the WIP checkpoint commit that saved its unfinished edits (if there were any).
+  turnTimeout?: { kind: "idle" | "ceiling"; afterMs: number; checkpointCommitted: boolean };
   // `brief` is set only when stopReason is "brief_pending" — the question to put in
   // front of the human. `resumeState` is set for "brief_pending" (resolveBrief,
   // queue.ts, resumes the exact session) AND for "context_budget" (continueNeedsHuman,

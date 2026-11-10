@@ -31,6 +31,35 @@ interface RunClaudeTurnOptions {
   // explicitly (config.models.*) so this is effectively always set in practice.
   model?: string;
   onLog?: (line: string) => void;
+  // Default to config.agentIdleTimeoutMs / agentTurnTimeoutMs; 0 disables.
+  idleTimeoutMs?: number;
+  turnTimeoutMs?: number;
+}
+
+// Thrown when the harness itself killed the turn: "idle" — the stream went silent for
+// idleTimeoutMs; "ceiling" — the turn ran past turnTimeoutMs. sessionId comes from the
+// stream's init event, so a caller can still --resume the killed session.
+export class TurnTimeoutError extends Error {
+  constructor(
+    readonly kind: "idle" | "ceiling",
+    readonly afterMs: number,
+    readonly sessionId?: string,
+  ) {
+    super(`claude turn stopped by ${kind === "idle" ? "idle watchdog" : "turn ceiling"} after ${Math.round(afterMs / 60000)} min`);
+    this.name = "TurnTimeoutError";
+  }
+}
+
+// SIGTERM first, SIGKILL if the process is still around after this — same grace the
+// CTO fleet gives with `timeout --kill-after=60`.
+const KILL_GRACE_MS = 60_000;
+
+// input + cache read + cache creation of ONE model call — what the model actually saw.
+export function messageContextTokens(usage: Record<string, unknown> | undefined): number {
+  if (!usage) return 0;
+  return (
+    Number(usage.input_tokens ?? 0) + Number(usage.cache_read_input_tokens ?? 0) + Number(usage.cache_creation_input_tokens ?? 0)
+  );
 }
 
 // Tracked outside the promise closure so /kill can reach across process
@@ -105,13 +134,35 @@ export async function runClaudeTurn(opts: RunClaudeTurnOptions): Promise<ClaudeT
 
   let resultLine: Record<string, unknown> | null = null;
   let stderrText = "";
+  let lastContextTokens = 0;
+  let streamSessionId: string | undefined;
+  const idleMs = opts.idleTimeoutMs ?? config.agentIdleTimeoutMs;
+  const ceilingMs = opts.turnTimeoutMs ?? config.agentTurnTimeoutMs;
 
   await new Promise<void>((resolve, reject) => {
     const child = spawn("claude", args, { cwd: opts.cwd, env: buildAgentEnv() });
     currentChild = child;
 
+    let stoppedBy: { kind: "idle" | "ceiling"; afterMs: number } | undefined;
+    let killTimer: NodeJS.Timeout | undefined;
+    const stop = (kind: "idle" | "ceiling", afterMs: number) => {
+      if (stoppedBy) return;
+      stoppedBy = { kind, afterMs };
+      child.kill("SIGTERM");
+      killTimer = setTimeout(() => child.kill("SIGKILL"), KILL_GRACE_MS);
+    };
+    const ceilingTimer = ceilingMs > 0 ? setTimeout(() => stop("ceiling", ceilingMs), ceilingMs) : undefined;
+    let idleTimer: NodeJS.Timeout | undefined;
+    const armIdle = () => {
+      if (idleMs <= 0) return;
+      clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => stop("idle", idleMs), idleMs);
+    };
+    armIdle();
+
     const rl = createInterface({ input: child.stdout });
     rl.on("line", (line) => {
+      armIdle();
       if (!line.trim()) return;
       let event: Record<string, unknown>;
       try {
@@ -123,6 +174,11 @@ export async function runClaudeTurn(opts: RunClaudeTurnOptions): Promise<ClaudeT
       if (event.type === "result") {
         resultLine = event;
         return;
+      }
+      if (event.type === "system" && typeof event.session_id === "string") streamSessionId = event.session_id;
+      if (event.type === "assistant") {
+        const used = messageContextTokens((event.message as Record<string, unknown>)?.usage as Record<string, unknown>);
+        if (used > 0) lastContextTokens = used;
       }
       if (!opts.onLog) return;
 
@@ -139,9 +195,21 @@ export async function runClaudeTurn(opts: RunClaudeTurnOptions): Promise<ClaudeT
     });
 
     child.stderr.on("data", (chunk) => (stderrText += chunk));
-    child.on("error", reject);
+    child.on("error", (err) => {
+      clearTimeout(ceilingTimer);
+      clearTimeout(idleTimer);
+      clearTimeout(killTimer);
+      reject(err);
+    });
     child.on("close", (code, signal) => {
       currentChild = null;
+      clearTimeout(ceilingTimer);
+      clearTimeout(idleTimer);
+      clearTimeout(killTimer);
+      if (stoppedBy) {
+        reject(new TurnTimeoutError(stoppedBy.kind, stoppedBy.afterMs, streamSessionId));
+        return;
+      }
       if (signal) {
         reject(new Error(`claude killed by ${signal}`));
         return;
@@ -176,5 +244,6 @@ export async function runClaudeTurn(opts: RunClaudeTurnOptions): Promise<ClaudeT
       cacheCreationInputTokens: Number(usage.cache_creation_input_tokens ?? 0),
       cacheReadInputTokens: Number(usage.cache_read_input_tokens ?? 0),
     },
+    contextTokens: lastContextTokens,
   };
 }

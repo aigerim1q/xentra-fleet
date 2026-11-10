@@ -186,17 +186,22 @@ export const config = {
   // node_modules symlink back into the main checkout can't be written through).
   // Opt-out only if a live run shows it breaks a role.
   agentRestrictedMode: (process.env.AGENT_RESTRICTED_MODE ?? "true") !== "false",
+  // Time bounds on every agent turn, as in the CTO fleet: a stream silent this long is
+  // killed (idle watchdog, 30 min), and no turn runs past the ceiling (5 h, the CTO's
+  // dev session_timeout). 0 disables either one.
+  agentIdleTimeoutMs: Number(process.env.AGENT_IDLE_TIMEOUT_MS ?? 30 * 60 * 1000),
+  agentTurnTimeoutMs: Number(process.env.AGENT_TURN_TIMEOUT_MS ?? 5 * 60 * 60 * 1000),
   maxIterations: Number(process.env.MAX_ITERATIONS ?? 5),
   maxBudgetUsd: Number(process.env.MAX_BUDGET_USD ?? 5),
-  // A resumed session's answer quality degrades well before this many tokens would
-  // ever hit a real context-window limit — this is a quality safety net, not a window
-  // ceiling. 150k matches Avengers Harness's own starting value for the same check
-  // (same reasoning: min(40% of window, 150k), picked conservative over precise).
-  maxContextTokens: Number(process.env.CONTEXT_BUDGET_TOKENS ?? 150_000),
-  // Automatic handoff below the hard stop (engine/handoff.ts): ~40% of a 200k window,
-  // the point Avengers Harness uses, at most twice per task before the hard stop
-  // above takes over.
-  handoffEnabled: (process.env.HANDOFF_ENABLED ?? "true") !== "false",
+  // Context policy follows the CTO fleet: one session per task, continued with --resume;
+  // Claude Code compacts its own context when the window fills (tune with
+  // CLAUDE_CODE_AUTO_COMPACT_WINDOW, passed through to the agent's env). The session is
+  // bounded by time instead (agentIdleTimeoutMs / agentTurnTimeoutMs below). The token
+  // stop and the token handoff are kept as opt-in tools, off by default.
+  // 0 = off. When on, measured as the real context of the turn's last model call.
+  maxContextTokens: Number(process.env.CONTEXT_BUDGET_TOKENS ?? 0),
+  // Opt-in handoff to a fresh session at a token threshold (engine/handoff.ts).
+  handoffEnabled: (process.env.HANDOFF_ENABLED ?? "false") === "true",
   handoffContextTokens: Number(process.env.HANDOFF_CONTEXT_TOKENS ?? 80_000),
   maxHandoffs: Number(process.env.MAX_HANDOFFS ?? 2),
   dailyBudgetUsd: Number(process.env.DAILY_BUDGET_USD ?? 20),
