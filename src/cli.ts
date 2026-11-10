@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { Command } from "commander";
 import { runCloseLoop } from "./engine/loop.js";
 import { runQueueOnce } from "./queue.js";
+import { registerFleetCommands } from "./fleet/cli.js";
 import type { TaskSpec } from "./types.js";
 
 function slugify(input: string): string {
@@ -148,5 +149,7 @@ program
     startDashboardServer(config.dashboard.port);
     console.log(`[dashboard] ${dashboardUrl(config.dashboard.port)}`);
   });
+
+registerFleetCommands(program);
 
 program.parseAsync(process.argv);
