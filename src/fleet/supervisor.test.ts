@@ -5,7 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Spool, parseLetter, readInbox, send, thread } from "./mail.js";
 import { parseRole, OWNER_ADDRESS, type Role } from "./roles.js";
-import { Supervisor, FLEET_ADDRESS, MAX_ATTEMPTS, MAX_GATE_RUNS, type WorkspaceOps } from "./supervisor.js";
+import { Supervisor, FLEET_ADDRESS, MAX_ATTEMPTS, MAX_GATE_RUNS, isLimitError, retryDelayMs, type WorkspaceOps } from "./supervisor.js";
+import { FleetLimits } from "./limits.js";
 import { parseReplyActions } from "./replyActions.js";
 import type { SessionInput, SessionOutcome } from "./session.js";
 import { isHeld } from "./loopGuard.js";
@@ -44,6 +45,7 @@ function supervisor(roles: Role[], reply: (i: SessionInput) => string, calls: st
     repos,
     stateDir,
     workspace: ws(calls),
+    backoff: BACKOFF,
     runSession: async (input): Promise<SessionOutcome> => {
       inputs.push(input);
       const text = reply(input);
@@ -52,6 +54,9 @@ function supervisor(roles: Role[], reply: (i: SessionInput) => string, calls: st
   });
   return { sup, inputs };
 }
+
+// Real retries pause 30 s → 10 min; tests pause milliseconds.
+const BACKOFF = { baseMs: 1, maxMs: 5 };
 
 async function drain(sup: Supervisor): Promise<void> {
   await sup.settle();
@@ -176,4 +181,79 @@ test("one thread never runs in two roles at once", async () => {
   await drain(sup);
   assert.equal(overlap, false);
   assert.equal(readInbox(spool, "xentra/auditor").length + readInbox(spool, "xentra/tester").length, 0);
+});
+
+test("a session that throws (e.g. the worktree cannot be created) counts as an attempt and is retried with a pause, then returned as not done", async () => {
+  let ensures = 0;
+  const sup = new Supervisor({
+    spool,
+    roles: [role("dev-1", "edit")],
+    repos,
+    stateDir,
+    backoff: { baseMs: 30, maxMs: 1000 },
+    workspace: {
+      ...ws(),
+      ensure: async () => {
+        ensures++;
+        throw new Error("fatal: '/repo' is not a git repository");
+      },
+    },
+    runSession: async () => {
+      throw new Error("must not run without a worktree");
+    },
+  });
+  const l = send(spool, { from: OWNER_ADDRESS, to: ["xentra/dev-1"], subject: "x", body: "" });
+  const t0 = Date.now();
+  await drain(sup);
+  const elapsed = Date.now() - t0;
+  assert.equal(ensures, MAX_ATTEMPTS, "one attempt per try, no hot loop");
+  assert.ok(elapsed >= 30 + 60, `retries must wait out the backoff (30 + 60 ms), took ${elapsed}ms`);
+  assert.equal(readInbox(spool, "xentra/dev-1").length, 0);
+  const back = readInbox(spool, OWNER_ADDRESS);
+  assert.equal(back.length, 1);
+  assert.match(back[0].subject, /^Не выполнено: x/);
+  assert.match(back[0].body, /not a git repository/);
+  assert.equal(back[0].thread, l.thread);
+});
+
+test("retry pauses grow exponentially and are capped; limit/auth errors are recognised", () => {
+  assert.equal(retryDelayMs(1, { baseMs: 10, maxMs: 100 }), 10);
+  assert.equal(retryDelayMs(2, { baseMs: 10, maxMs: 100 }), 20);
+  assert.equal(retryDelayMs(3, { baseMs: 10, maxMs: 100 }), 40);
+  assert.equal(retryDelayMs(9, { baseMs: 10, maxMs: 100 }), 100);
+  assert.equal(retryDelayMs(1), 30_000);
+  for (const m of ["You're out of usage credits", "Rate limit reached", "HTTP 429 Too Many Requests", "Not logged in · Please run /login", "Invalid API key"]) {
+    assert.ok(isLimitError(m), m);
+  }
+  for (const m of ["TypeError: x is undefined", "No conversation found", "claude exited with code 1: boom", undefined]) {
+    assert.ok(!isLimitError(m), String(m));
+  }
+});
+
+test("an engine limit error pauses the fleet and tells the owner; the letter waits and burns no attempt", async () => {
+  const limits = new FleetLimits(stateDir, { claudeUsd: 100, claudeSessions: 100, codexSessions: 100 });
+  let sessions = 0;
+  const sup = new Supervisor({
+    spool,
+    roles: [role("pm")],
+    repos,
+    stateDir,
+    limits,
+    backoff: BACKOFF,
+    workspace: ws(),
+    runSession: async () => {
+      sessions++;
+      return { ok: false, actions: parseReplyActions(""), resultText: "", error: "claude exited with code 1: You're out of usage credits", costUsd: 0 };
+    },
+  });
+  send(spool, { from: OWNER_ADDRESS, to: ["xentra/pm"], subject: "Вопрос", body: "" });
+  await drain(sup);
+  assert.equal(sessions, 1, "no retry storm");
+  assert.equal(limits.isFleetPaused(), true);
+  assert.equal(readInbox(spool, "xentra/pm").length, 1, "the letter stays for after the pause");
+  assert.ok(!existsSync(join(stateDir, "pm")) || !readdirSync(join(stateDir, "pm")).some((f) => f.startsWith("attempts.")), "no attempt counted");
+  const owner = readInbox(spool, OWNER_ADDRESS);
+  assert.equal(owner.length, 1);
+  assert.match(owner[0].subject, /Флот на паузе/);
+  assert.match(owner[0].body, /out of usage credits/);
 });

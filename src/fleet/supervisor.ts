@@ -29,6 +29,24 @@ export const MAX_ATTEMPTS = 3;
 export const MAX_GATE_RUNS = 8;
 const NOT_DONE = "Не выполнено:";
 
+// Pause between retries of one letter after a failed session: base * 2^(attempt-1),
+// capped — a crash in the session (bad repo path, worktree gone, network) must not turn
+// into a hot loop of fetch + auto-ack + log line every few milliseconds.
+export const DEFAULT_RETRY_BACKOFF = { baseMs: 30_000, maxMs: 10 * 60_000 };
+
+// An engine error that no retry can fix and that isn't the letter's fault: the
+// subscription window is used up, or the CLI lost its login. Such a session is not an
+// attempt; the fleet pauses and the owner is told (the CTO fleet's "limits gate").
+const LIMIT_ERROR = /rate.?limit|usage limit|out of (usage )?credits|too many requests|\b429\b|\b529\b|overloaded|quota|not logged in|please (run )?\/?login|unauthori[sz]ed|authentication|invalid api key|\b401\b/i;
+
+export function isLimitError(text: string | undefined): boolean {
+  return !!text && LIMIT_ERROR.test(text);
+}
+
+export function retryDelayMs(attempt: number, backoff = DEFAULT_RETRY_BACKOFF): number {
+  return Math.min(backoff.maxMs, backoff.baseMs * 2 ** Math.max(0, attempt - 1));
+}
+
 export interface WorkspaceOps {
   ensure(repo: RepoTarget, thread: string, opts: { baselines: boolean }): Promise<string>;
   commit(dir: string, message: string): Promise<boolean>;
@@ -50,6 +68,8 @@ export interface SupervisorOptions {
   limits?: FleetLimits;
   // Extra context for a thread's session (e.g. the fleet snapshot in the owner's deputy thread).
   threadContext?: (thread: string, role: Role) => string | undefined;
+  // Retry pause per letter after a failed session (tests shorten it).
+  backoff?: { baseMs: number; maxMs: number };
 }
 
 export class Supervisor {
@@ -57,6 +77,8 @@ export class Supervisor {
   private lastBlock = new Map<string, string>();
   private busyThreads = new Set<string>();
   private running = new Set<Promise<void>>();
+  // letter id -> earliest time (ms) it may be picked up again
+  private deferred = new Map<string, number>();
   private timer?: NodeJS.Timeout;
   private watchers: FSWatcher[] = [];
   private stopped = false;
@@ -129,13 +151,29 @@ export class Supervisor {
     }
   }
 
-  // Runs until no role has anything left to do (used by `fleet once` and tests).
+  // Runs until no role has anything left to do (used by `fleet once` and tests). A letter
+  // waiting out its retry pause counts as "something to do": settle sleeps until it is due.
   async settle(maxRounds = 200): Promise<void> {
     for (let i = 0; i < maxRounds; i++) {
       this.tick();
-      if (this.running.size === 0) return;
+      if (this.running.size === 0) {
+        const wait = this.nextDeferralMs();
+        if (wait === undefined) return;
+        await new Promise((r) => setTimeout(r, wait));
+        continue;
+      }
       await Promise.all([...this.running]);
     }
+  }
+
+  private nextDeferralMs(now = Date.now()): number | undefined {
+    let min: number | undefined;
+    for (const t of this.deferred.values()) if (min === undefined || t < min) min = t;
+    return min === undefined ? undefined : Math.max(0, min - now);
+  }
+
+  private defer(l: Letter, ms: number): void {
+    this.deferred.set(l.id, Date.now() + ms);
   }
 
   // Starts a batch for every idle role that has one. Returns the started sessions'
@@ -190,10 +228,80 @@ export class Supervisor {
         live.push(l);
       }
     }
-    return pickBatch(live, { skip: (l) => this.busyThreads.has(l.thread) });
+    const now = Date.now();
+    const waiting = (l: Letter) => {
+      const t = this.deferred.get(l.id);
+      if (t === undefined) return false;
+      if (t > now) return true;
+      this.deferred.delete(l.id);
+      return false;
+    };
+    return pickBatch(live, { skip: (l) => this.busyThreads.has(l.thread) || waiting(l) });
   }
 
+  // A session that crashed (worktree gone, repo path wrong, mailbox error) counts as an
+  // attempt for every letter of the batch, with a pause before the retry; a limit/auth
+  // error pauses the fleet instead and costs no attempt.
   private async handle(role: Role, batch: Batch): Promise<void> {
+    try {
+      await this.run(role, batch);
+    } catch (err) {
+      const message = (err as Error).message ?? String(err);
+      const letters = [batch.primary, ...batch.extras];
+      this.log(`${role.role}: session failed hard: ${message}`);
+      if (isLimitError(message)) {
+        this.pauseForLimit(role, batch, message);
+        return;
+      }
+      for (const l of letters) this.retryOrGiveUp(role, l, `Сессия роли ${role.mail} упала: ${message.slice(0, 300)}`);
+      for (const l of letters) this.autoAck(role, l, "сессия завершена с ошибкой");
+    }
+  }
+
+  // Attempt n of a letter: either a pause before the next try or, at MAX_ATTEMPTS, a
+  // «Не выполнено» back to the sender.
+  private retryOrGiveUp(role: Role, l: Letter, why: string): void {
+    const n = this.bumpAttempts(role, l.id);
+    if (n >= MAX_ATTEMPTS) {
+      this.notifyOnce(l, `${NOT_DONE} ${l.subject}`, `Роль ${role.mail} не смогла обработать письмо за ${MAX_ATTEMPTS} попытки. ${why}`.trim());
+      archive(this.o.spool, role.mail, l.id);
+      this.clearAttempts(role, l.id);
+      return;
+    }
+    const ms = retryDelayMs(n, this.o.backoff);
+    this.defer(l, ms);
+    this.log(`${role.role}: ${l.id} attempt ${n}/${MAX_ATTEMPTS}, retry in ${Math.round(ms / 1000)}s`);
+  }
+
+  private pauseForLimit(role: Role, batch: Batch, message: string): void {
+    const letters = [batch.primary, ...batch.extras];
+    const { spool, limits } = this.o;
+    // No attempt is counted; the letters wait out the longest pause (and the fleet pause,
+    // when limits are on) rather than burning the three attempts in seconds.
+    for (const l of letters) this.defer(l, retryDelayMs(99, this.o.backoff));
+    this.log(`${role.role}: engine limit/auth error — fleet paused: ${message}`);
+    if (!limits || limits.isFleetPaused()) return;
+    limits.pause();
+    try {
+      send(spool, {
+        from: FLEET_ADDRESS,
+        to: [OWNER_ADDRESS],
+        subject: "Флот на паузе: лимит или авторизация движка",
+        body: [
+          `Сессия роли ${role.mail} (${role.engine}) не стартовала: ${message.slice(0, 300)}`,
+          "",
+          "Похоже на исчерпанное окно подписки или слетевший логин. Письма ждут в очереди, попытки не тратятся.",
+          "Когда лимит отпустит (или после `claude login`) — ▶️ Возобновить команду в «Управлении».",
+        ].join("\n"),
+        priority: "high",
+        thread: batch.thread,
+      });
+    } catch (err) {
+      this.log(`notify owner about pause failed: ${(err as Error).message}`);
+    }
+  }
+
+  private async run(role: Role, batch: Batch): Promise<void> {
     const { spool } = this.o;
     const letters = [batch.primary, ...batch.extras];
     const repoKind = (batch.repo as RepoTarget["kind"] | undefined) ?? role.defaultRepo;
@@ -244,6 +352,12 @@ export class Supervisor {
       /* metrics are best-effort */
     }
     this.o.limits?.record(role.engine, outcome.costUsd);
+
+    if (!outcome.ok && isLimitError(outcome.error)) {
+      for (const l of letters) this.autoAck(role, l, "сессия не стартовала: лимит движка");
+      this.pauseForLimit(role, batch, outcome.error ?? "");
+      return;
+    }
 
     // Deliver what the role asked for. A bad block fails alone and is reported back.
     const answered = new Set<string>();
@@ -386,16 +500,7 @@ export class Supervisor {
         this.clearAttempts(role, l.id);
         continue;
       }
-      const n = this.bumpAttempts(role, l.id);
-      if (n >= MAX_ATTEMPTS) {
-        this.notifyOnce(
-          l,
-          `${NOT_DONE} ${l.subject}`,
-          `Роль ${role.mail} не смогла обработать письмо за ${MAX_ATTEMPTS} попытки.${outcome.error ? ` Последняя ошибка: ${outcome.error}` : ""}`,
-        );
-        archive(spool, role.mail, l.id);
-        this.clearAttempts(role, l.id);
-      }
+      this.retryOrGiveUp(role, l, outcome.error ? `Последняя ошибка: ${outcome.error}` : "");
     }
     for (const l of letters) this.autoAck(role, l, `сессия завершена ${outcome.ok ? "ok" : "с ошибкой"}`);
 
@@ -466,5 +571,6 @@ export class Supervisor {
 
   private clearAttempts(role: Role, id: string): void {
     rmSync(this.attemptsPath(role, id), { force: true });
+    this.deferred.delete(id);
   }
 }

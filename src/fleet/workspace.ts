@@ -68,12 +68,21 @@ export async function ensureWorkspace(target: RepoTarget, thread: string, opts: 
     return dir;
   }
   mkdirSync(dirname(dir), { recursive: true });
-  await execFileAsync("git", ["fetch", "origin", target.baseBranch], { cwd: target.path }).catch(() => {});
-  const start = await execFileAsync("git", ["rev-parse", "--verify", `origin/${target.baseBranch}`], { cwd: target.path })
+  const git = (args: string[]) => execFileAsync("git", args, { cwd: target.path });
+  await git(["fetch", "origin", target.baseBranch]).catch(() => {});
+  const start = await git(["rev-parse", "--verify", `origin/${target.baseBranch}`])
     .then(() => `origin/${target.baseBranch}`)
     .catch(() => "HEAD");
   const branch = branchFor(thread);
-  await execFileAsync("git", ["worktree", "add", "-B", branch, dir, start], { cwd: target.path });
+  // A directory deleted by hand (or a half-created one) can still be registered with git,
+  // which then refuses `worktree add` outright — same repair as the pipeline (engine/git.ts).
+  // The thread branch itself is kept: its commits are the thread's work.
+  await git(["worktree", "remove", "--force", dir]).catch(() => {});
+  await git(["worktree", "prune"]).catch(() => {});
+  const branchExists = await git(["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`])
+    .then(() => true)
+    .catch(() => false);
+  await git(branchExists ? ["worktree", "add", dir, branch] : ["worktree", "add", "-B", branch, dir, start]);
   const nm = join(target.path, "node_modules");
   if (existsSync(nm)) {
     try {
