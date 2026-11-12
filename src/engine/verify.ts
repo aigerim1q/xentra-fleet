@@ -1,30 +1,54 @@
-import { exec } from "node:child_process";
-import { promisify } from "node:util";
+import { spawn } from "node:child_process";
 import type { GateBaseline, GateResult, GateSpec, VerifyResult } from "../types.js";
 import { buildAgentEnv } from "./claudeEngine.js";
 import { secretValues } from "../config.js";
+import { killProcessGroup } from "./processGroup.js";
 import { scrubSecrets } from "./secretScrub.js";
 
-const execAsync = promisify(exec);
+// A gate that hangs (a test waiting on a port, a watcher that never exits) would hold
+// the role and its thread forever: every gate has a time limit, and on timeout its whole
+// process group is killed, not just the shell at the top.
+export const DEFAULT_GATE_TIMEOUT_MS = Number(process.env.GATE_TIMEOUT_MS ?? 30 * 60 * 1000);
+const GATE_KILL_GRACE_MS = 10_000;
+const OUTPUT_CAP = 1024 * 1024 * 20;
 
 // Gates run code the agent wrote (tests, acceptance tests, whatever `yarn test`
 // picks up), so they get the same token-free env as the agent itself — otherwise a
 // test could read JIRA_PAT/GITLAB_TOKEN/TELEGRAM_BOT_TOKEN from process.env and
 // send them out, bypassing buildAgentEnv entirely. Output is scrubbed too: it goes
 // back into the agent's prompt and, on needs-human, to Telegram.
-async function runRaw(cwd: string, command: string): Promise<{ exitedZero: boolean; output: string }> {
+export function runRaw(cwd: string, command: string, timeoutMs = DEFAULT_GATE_TIMEOUT_MS): Promise<{ exitedZero: boolean; output: string; timedOut: boolean }> {
   const scrub = (text: string) => scrubSecrets(text, secretValues());
-  try {
-    const { stdout, stderr } = await execAsync(command, {
-      cwd,
-      env: buildAgentEnv(),
-      maxBuffer: 1024 * 1024 * 20,
+  return new Promise((resolve) => {
+    const child = spawn(command, { cwd, shell: true, detached: true, env: buildAgentEnv(), stdio: ["ignore", "pipe", "pipe"] });
+    let out = "";
+    const append = (chunk: Buffer) => {
+      out += chunk.toString();
+      if (out.length > OUTPUT_CAP) out = out.slice(-OUTPUT_CAP);
+    };
+    child.stdout.on("data", append);
+    child.stderr.on("data", append);
+    let timedOut = false;
+    let killTimer: NodeJS.Timeout | undefined;
+    const timer =
+      timeoutMs > 0
+        ? setTimeout(() => {
+            timedOut = true;
+            killProcessGroup(child, "SIGTERM");
+            killTimer = setTimeout(() => killProcessGroup(child, "SIGKILL"), GATE_KILL_GRACE_MS);
+          }, timeoutMs)
+        : undefined;
+    const done = (exitedZero: boolean, extra: string) => {
+      clearTimeout(timer);
+      clearTimeout(killTimer);
+      resolve({ exitedZero, output: scrub([out, extra].filter(Boolean).join("\n")), timedOut });
+    };
+    child.on("error", (err) => done(false, err.message));
+    child.on("close", (code, signal) => {
+      if (timedOut) done(false, `[гейт остановлен: не уложился в ${Math.round(timeoutMs / 60000)} мин, процессы убиты]`);
+      else done(code === 0, signal ? `[гейт убит сигналом ${signal}]` : "");
     });
-    return { exitedZero: true, output: scrub(stdout + stderr) };
-  } catch (err: unknown) {
-    const e = err as { stdout?: string; stderr?: string; message: string };
-    return { exitedZero: false, output: scrub((e.stdout ?? "") + (e.stderr ?? "") || e.message) };
-  }
+  });
 }
 
 // Per-gate count parsers. A gate without one (or whose output doesn't match) falls
@@ -67,7 +91,7 @@ function parseFailureCount(gateName: string, output: string): number | null {
 export async function establishBaselines(cwd: string, gates: GateSpec[]): Promise<GateBaseline[]> {
   const baselines: GateBaseline[] = [];
   for (const gate of gates) {
-    const { exitedZero, output } = await runRaw(cwd, gate.command);
+    const { exitedZero, output } = await runRaw(cwd, gate.command, gate.timeoutMs);
     baselines.push({ name: gate.name, command: gate.command, exitedZero, failureCount: parseFailureCount(gate.name, output) });
   }
   return baselines;
@@ -94,7 +118,7 @@ export async function runGates(cwd: string, gates: GateSpec[], baselines: GateBa
   const results: GateResult[] = [];
   for (const gate of gates) {
     const baseline = baselines.find((b) => b.name === gate.name);
-    const { exitedZero, output } = await runRaw(cwd, gate.command);
+    const { exitedZero, output } = await runRaw(cwd, gate.command, gate.timeoutMs);
     // Strict gates never consult their baseline — a brand-new acceptance test failing
     // at baseline (no fix exists yet) is expected, not a pre-existing condition to
     // tolerate; it must actually pass now, "no worse than before" isn't good enough.

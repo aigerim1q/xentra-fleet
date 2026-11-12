@@ -108,7 +108,7 @@ test("the shipped auditors are flagged, and an auditor session records its verdi
       roles: [auditor],
       repos: { backend: { kind: "backend", path: "/r", baseBranch: "dev", gates: [] }, frontend: undefined },
       stateDir: s.stateDir,
-      workspace: { ensure: async () => "/wt", commit: async () => false, gates: async () => ({ passed: true, output: "", gates: [] }), diffStat: async () => "", headSha: async () => "abc123", changes: async () => ({ head: "abc123", stat: "", text: "" }) },
+      workspace: { ensure: async () => "/wt", commit: async () => false, gates: async () => ({ passed: true, output: "", gates: [] }), diffStat: async () => "", headSha: async () => "abc123", changes: async () => ({ head: "abc123", stat: "", text: "" }), integrity: async () => [] },
       runSession: async (i) => {
         const t = `<mail to="xentra/pm" subject="Ревью">${CLEAR}</mail><ack id="${i.batch.primary.id}"/>`;
         return { ok: true, actions: parseReplyActions(t), resultText: t, costUsd: 0 };

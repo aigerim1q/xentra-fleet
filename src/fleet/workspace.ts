@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
+import { checkGateIntegrity } from "../engine/gateIntegrity.js";
 import { commitAll } from "../engine/git.js";
 import { establishBaselines, runGates } from "../engine/verify.js";
 import type { GateBaseline, GateSpec, VerifyResult } from "../types.js";
@@ -102,13 +103,27 @@ export async function ensureWorkspace(target: RepoTarget, thread: string, opts: 
   return dir;
 }
 
+// False = nothing to commit; a failed commit (hook, index) throws — the supervisor reports it.
 export async function commitWorkspace(dir: string, message: string): Promise<boolean> {
-  return commitAll(dir, message).catch(() => false);
+  return commitAll(dir, message);
 }
 
 export async function runWorkspaceGates(target: RepoTarget, dir: string): Promise<VerifyResult> {
   const meta = readMeta(dir);
   return runGates(dir, target.gates, meta?.baselines ?? []);
+}
+
+async function baseRef(dir: string, baseBranch: string): Promise<string> {
+  return execFileAsync("git", ["rev-parse", "--verify", "--quiet", `origin/${baseBranch}`], { cwd: dir })
+    .then(() => `origin/${baseBranch}`)
+    .catch(() => baseBranch);
+}
+
+// Same mechanical check as the pipeline (engine/gateIntegrity.ts): deleted tests, skip
+// markers, edited gate/CI config in the thread's diff against the base.
+export async function workspaceIntegrity(dir: string, baseBranch: string): Promise<string[]> {
+  const violations = await checkGateIntegrity(dir, await baseRef(dir, baseBranch));
+  return violations.map((v) => v.description);
 }
 
 export async function workspaceDiff(dir: string, baseBranch: string): Promise<string> {
@@ -130,9 +145,7 @@ export interface WorkspaceChanges {
 export async function workspaceChanges(dir: string, baseBranch: string): Promise<WorkspaceChanges> {
   const git = (args: string[]) => execFileAsync("git", args, { cwd: dir, maxBuffer: 1024 * 1024 * 20 }).then((r) => r.stdout);
   const head = (await git(["rev-parse", "HEAD"])).trim();
-  const base = await git(["rev-parse", "--verify", "--quiet", `origin/${baseBranch}`])
-    .then(() => `origin/${baseBranch}`)
-    .catch(() => baseBranch);
+  const base = await baseRef(dir, baseBranch);
   const stat = (await git(["diff", `${base}...HEAD`, "--stat"]).catch(() => "")).trim();
   const text = stat ? await git(["diff", `${base}...HEAD`]).catch(() => "") : "";
   return { head, stat, text };

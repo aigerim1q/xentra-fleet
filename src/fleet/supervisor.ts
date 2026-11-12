@@ -55,6 +55,8 @@ export interface WorkspaceOps {
   diffStat(dir: string, baseBranch: string): Promise<string>;
   headSha(dir: string): Promise<string>;
   changes(dir: string, baseBranch: string): Promise<{ head: string; stat: string; text: string }>;
+  // Gate-integrity violations in the thread's diff (engine/gateIntegrity.ts); [] = clean.
+  integrity(dir: string, baseBranch: string): Promise<string[]>;
 }
 
 export interface SupervisorOptions {
@@ -420,25 +422,49 @@ export class Supervisor {
     }
 
     if (role.access === "edit") {
-      const committed = await this.o.workspace.commit(cwd, `fleet(${role.role}): ${batch.primary.subject}\n\nThread ${batch.thread}.`);
-      if (committed) this.log(`${role.role}: committed edits in ${cwd}`);
+      try {
+        const committed = await this.o.workspace.commit(cwd, `fleet(${role.role}): ${batch.primary.subject}\n\nThread ${batch.thread}.`);
+        if (committed) this.log(`${role.role}: committed edits in ${cwd}`);
+      } catch (err) {
+        // Not "nothing to commit": the edits are still in the worktree, uncommitted.
+        this.log(`${role.role}: commit failed in ${cwd}: ${(err as Error).message}`);
+        problems.push(`правки не закоммичены (${(err as Error).message.slice(0, 500)}) — они лежат в рабочей копии; если это хук коммита, почини то, на что он ругается`);
+      }
     }
 
     if (outcome.actions.gates && this.bumpCounter(`gates.${batch.thread}`) > MAX_GATE_RUNS) {
       problems.push(`гейты в этом треде уже запускались ${MAX_GATE_RUNS} раз — больше не запускаю; напиши pm или владельцу, что мешает`);
     } else if (outcome.actions.gates) {
-      const g = await this.o.workspace.gates(repo, cwd);
       const sha = await this.o.workspace.headSha(cwd).catch(() => "");
-      saveGateRun(this.o.stateDir, batch.thread, { sha, passed: g.passed, at: new Date().toISOString(), gates: g.gates.map((x) => ({ name: x.name, passed: x.passed })) });
-      const summary = g.gates.map((x) => `- ${x.name}: ${x.passed ? "✅" : "❌"}`).join("\n");
-      send(spool, {
-        from: FLEET_ADDRESS,
-        to: [role.mail],
-        subject: `Гейты: ${g.passed ? "зелёные" : "есть красные"}`,
-        body: `${summary}\n\n${g.passed ? "" : "```\n" + g.output.slice(-6000) + "\n```"}`.trim(),
-        thread: batch.thread,
-        repo: batch.repo,
-      });
+      // As in the pipeline (engine/loop.ts): a gate "earned" by deleting a test, adding
+      // .skip or editing gate config is not run at all — the diff is sent back instead.
+      const violations = await this.o.workspace.integrity(cwd, repo.baseBranch).catch((err) => [`проверка целостности не выполнена: ${(err as Error).message}`]);
+      if (violations.length > 0) {
+        saveGateRun(this.o.stateDir, batch.thread, { sha, passed: false, at: new Date().toISOString(), gates: [], integrity: violations });
+        send(spool, {
+          from: FLEET_ADDRESS,
+          to: [role.mail],
+          subject: "Гейты: есть красные",
+          body: [
+            "Гейты не запускались: в diff треда ослаблены сами проверки. Верни как было и попроси гейты снова.",
+            ...violations.map((v) => `- ${v}`),
+          ].join("\n"),
+          thread: batch.thread,
+          repo: batch.repo,
+        });
+      } else {
+        const g = await this.o.workspace.gates(repo, cwd);
+        saveGateRun(this.o.stateDir, batch.thread, { sha, passed: g.passed, at: new Date().toISOString(), gates: g.gates.map((x) => ({ name: x.name, passed: x.passed })) });
+        const summary = g.gates.map((x) => `- ${x.name}: ${x.passed ? "✅" : "❌"}`).join("\n");
+        send(spool, {
+          from: FLEET_ADDRESS,
+          to: [role.mail],
+          subject: `Гейты: ${g.passed ? "зелёные" : "есть красные"}`,
+          body: `${summary}\n\n${g.passed ? "" : "```\n" + g.output.slice(-6000) + "\n```"}`.trim(),
+          thread: batch.thread,
+          repo: batch.repo,
+        });
+      }
     }
 
     if (role.isAuditor && outcome.ok) {
@@ -481,6 +507,8 @@ export class Supervisor {
           });
           const auditors = this.o.roles.filter((r) => r.isAuditor).map((r) => r.role);
           const state = describeShaState(headSha, loadGateRun(this.o.stateDir, batch.thread), loadVerdicts(this.o.stateDir, batch.thread), auditors);
+          const violations = await this.o.workspace.integrity(cwd, repo.baseBranch).catch(() => []);
+          if (violations.length > 0) state.push(`⚠️ Целостность гейтов нарушена в diff: ${violations.join("; ")}`);
           send(spool, {
             from: FLEET_ADDRESS,
             to: [OWNER_ADDRESS],

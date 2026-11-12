@@ -133,3 +133,27 @@ test("strict gate passes once it actually exits 0, regardless of a failing basel
   const result = await runGates(".", fixedGates, baselines);
   assert.equal(result.passed, true);
 });
+
+test("a gate that runs past its time limit fails with a clear note, and its whole process group is killed", async () => {
+  const { mkdtempSync, readFileSync, rmSync, existsSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { pidAlive } = await import("./processGroup.js");
+  const dir = mkdtempSync(join(tmpdir(), "gate-timeout-"));
+  try {
+    const pidFile = join(dir, "child.pid");
+    // The gate starts a background grandchild and waits on it: only a group kill reaches it.
+    const gate: GateSpec = { name: "test", command: `sleep 30 & echo $! > ${pidFile}; wait`, timeoutMs: 300 };
+    const t0 = Date.now();
+    const result = await runGates(dir, [gate], []);
+    assert.ok(Date.now() - t0 < 5000, "the gate must not run to completion");
+    assert.equal(result.passed, false);
+    assert.match(result.output, /не уложился/);
+    assert.ok(existsSync(pidFile));
+    const pid = Number(readFileSync(pidFile, "utf8").trim());
+    await new Promise((r) => setTimeout(r, 200));
+    assert.equal(pidAlive(pid), false, `grandchild ${pid} must be dead after the group kill`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

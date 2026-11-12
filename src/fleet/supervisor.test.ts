@@ -34,6 +34,7 @@ const ws = (calls: string[] = []): WorkspaceOps => ({
   diffStat: async () => " src/a.ts | 2 +-\n 1 file changed",
   headSha: async () => "sha1",
   changes: async () => ({ head: "sha1", stat: " src/a.ts | 2 +-\n 1 file changed", text: "diff --git a/src/a.ts b/src/a.ts\n+changed" }),
+  integrity: async () => [],
 });
 
 const repos = { backend: { kind: "backend" as const, path: "/repo", baseBranch: "dev", gates: [] }, frontend: undefined };
@@ -269,4 +270,56 @@ test("roles without a shell get the thread's diff and head sha in their session 
   assert.match(auditor.changes!.text, /\+changed/);
   assert.equal(auditor.changes!.truncated, false);
   assert.equal(inputs.find((i) => i.role.role === "dev-1")!.changes, undefined);
+});
+
+test("<gates/> on a diff that weakens the checks (deleted test, .skip, gate config) is refused: the gates do not run and the role is told what to revert", async () => {
+  const calls: string[] = [];
+  let n = 0;
+  const sup = new Supervisor({
+    spool,
+    roles: [role("dev-1", "edit")],
+    repos,
+    stateDir,
+    backoff: BACKOFF,
+    workspace: { ...ws(calls), integrity: async () => ["удалён тестовый файл: src/a.spec.ts", "добавлен skip/only/todo в тест: src/b.spec.ts"] },
+    runSession: async (i) => {
+      const text = ++n === 1 ? `<gates/><ack id="${i.batch.primary.id}"/>` : `<ack id="${i.batch.primary.id}"/>`;
+      return { ok: true, actions: parseReplyActions(text), resultText: text, costUsd: 0 };
+    },
+  });
+  send(spool, { from: OWNER_ADDRESS, to: ["xentra/dev-1"], subject: "x", body: "" });
+  await drain(sup);
+  assert.ok(!calls.includes("gates"), "gates must not run on a tampered diff");
+  const sent = readdirSync(spool.dir("Sent", FLEET_ADDRESS)).map((f) => parseLetter(readFileSync(join(spool.dir("Sent", FLEET_ADDRESS), f), "utf8")));
+  const verdict = sent.find((l) => l.subject === "Гейты: есть красные")!;
+  assert.match(verdict.body, /ослаблены сами проверки/);
+  assert.match(verdict.body, /удалён тестовый файл: src\/a\.spec\.ts/);
+});
+
+test("a commit that fails (hook) is reported to the role as uncommitted edits, not swallowed", async () => {
+  let n = 0;
+  const sup = new Supervisor({
+    spool,
+    roles: [role("dev-1", "edit")],
+    repos,
+    stateDir,
+    backoff: BACKOFF,
+    workspace: {
+      ...ws(),
+      commit: async () => {
+        throw new Error("git commit failed: hook says no");
+      },
+    },
+    runSession: async (i) => {
+      const text = `<ack id="${i.batch.primary.id}"/>`;
+      n++;
+      return { ok: true, actions: parseReplyActions(text), resultText: text, costUsd: 0 };
+    },
+  });
+  send(spool, { from: OWNER_ADDRESS, to: ["xentra/dev-1"], subject: "x", body: "" });
+  await drain(sup);
+  assert.ok(n >= 1);
+  const sent = readdirSync(spool.dir("Sent", FLEET_ADDRESS)).map((f) => parseLetter(readFileSync(join(spool.dir("Sent", FLEET_ADDRESS), f), "utf8")));
+  const problem = sent.find((l) => l.subject === "Не всё из ответа выполнено")!;
+  assert.match(problem.body, /правки не закоммичены \(git commit failed: hook says no\)/);
 });

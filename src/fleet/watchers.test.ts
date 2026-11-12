@@ -94,7 +94,7 @@ test("<watch-ci/> needs a pushed MR; mails to notifiers are refused", async () =
       roles: [pm],
       repos: { backend: { kind: "backend", path: "/r", baseBranch: "dev", gates: [], gitlabProjectPath: "saqr/back-ai" }, frontend: undefined },
       stateDir: s.stateDir,
-      workspace: { ensure: async () => "/wt", commit: async () => false, gates: async () => ({ passed: true, output: "", gates: [] }), diffStat: async () => "", headSha: async () => "sha1", changes: async () => ({ head: "sha1", stat: "", text: "" }) },
+      workspace: { ensure: async () => "/wt", commit: async () => false, gates: async () => ({ passed: true, output: "", gates: [] }), diffStat: async () => "", headSha: async () => "sha1", changes: async () => ({ head: "sha1", stat: "", text: "" }), integrity: async () => [] },
       runSession: async (i) => {
         const t = reply.replace("ID", i.batch.primary.id);
         return { ok: true, actions: parseReplyActions(t), resultText: t, costUsd: 0 };

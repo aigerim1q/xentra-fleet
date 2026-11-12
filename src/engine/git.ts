@@ -3,6 +3,7 @@ import { promisify } from "node:util";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { symlink, access } from "node:fs/promises";
+import { buildAgentEnv } from "./claudeEngine.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -122,13 +123,22 @@ export async function deleteBranch(repoPath: string, branchName: string): Promis
   await execFileAsync("git", ["branch", "-D", branchName], { cwd: repoPath }).catch(() => {});
 }
 
+// False only when there is nothing to commit. A commit that fails (a pre-commit hook
+// rejecting, a broken index) throws with git's output: silently reporting it as "nothing
+// to commit" would leave the agent's edits uncommitted and unnoticed. Hooks run with the
+// agent's token-free env: they execute code from the repository, which the agent edits.
 export async function commitAll(worktreeDir: string, message: string): Promise<boolean> {
-  await execFileAsync("git", ["add", "-A"], { cwd: worktreeDir });
+  const env = buildAgentEnv();
+  await execFileAsync("git", ["add", "-A"], { cwd: worktreeDir, env });
+  const { stdout: status } = await execFileAsync("git", ["status", "--porcelain"], { cwd: worktreeDir, env });
+  if (!status.trim()) return false;
   try {
-    await execFileAsync("git", ["commit", "-m", message], { cwd: worktreeDir });
+    await execFileAsync("git", ["commit", "-m", message], { cwd: worktreeDir, env });
     return true;
-  } catch {
-    return false; // nothing to commit
+  } catch (err) {
+    const e = err as { stdout?: string; stderr?: string; message: string };
+    const output = [e.stdout, e.stderr].filter(Boolean).join("\n").trim() || e.message;
+    throw new Error(`git commit failed: ${output.slice(-2000)}`);
   }
 }
 

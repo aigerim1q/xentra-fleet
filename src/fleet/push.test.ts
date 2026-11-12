@@ -74,7 +74,7 @@ test("only pm may request a push; the request goes to the owner with the diffsta
       roles: [pm, dev, auditor, auditorCodex],
       repos: { backend: { kind: "backend", path: "/r", baseBranch: "dev", gates: [], gitlabProjectPath: "saqr/back-ai" }, frontend: undefined },
       stateDir,
-      workspace: { ensure: async () => "/wt", commit: async () => false, gates: async () => ({ passed: true, output: "", gates: [{ name: "test", passed: true }] }), diffStat: async () => " a.ts | 1 +", headSha: async () => "sha1", changes: async () => ({ head: "sha1", stat: "", text: "" }) },
+      workspace: { ensure: async () => "/wt", commit: async () => false, gates: async () => ({ passed: true, output: "", gates: [{ name: "test", passed: true }] }), diffStat: async () => " a.ts | 1 +", headSha: async () => "sha1", changes: async () => ({ head: "sha1", stat: "", text: "" }), integrity: async () => [] },
       runSession: async (i) => {
         // dev asks for gates once (on the owner's letter), then just acks; pm asks for a push.
         const t =

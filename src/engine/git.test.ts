@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { mkdtemp, writeFile, readFile, rm, mkdir, realpath } from "node:fs/promises";
+import { mkdtemp, writeFile, readFile, rm, mkdir, realpath, chmod } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -420,4 +420,32 @@ test("deleteBranch on a non-existent branch is a no-op, not an error", async () 
   const repo = await makeRepo();
   await assert.doesNotReject(deleteBranch(repo, "no-such-branch"));
   await rm(repo, { recursive: true, force: true });
+});
+
+test("commitAll distinguishes a failed commit (hook) from nothing to commit, and hooks run without harness tokens", async () => {
+  const repo = await makeRepo();
+  const branch = uniqueBranch();
+  const old = process.env.GITLAB_TOKEN;
+  process.env.GITLAB_TOKEN = "leak-me-please";
+  try {
+    const dir = await createWorktree(repo, branch);
+    const hooks = join(repo, ".git", "hooks");
+    await mkdir(hooks, { recursive: true });
+    const hook = join(hooks, "pre-commit");
+    const seen = join(repo, "hook-env.txt");
+    await writeFile(hook, `#!/bin/sh\nenv > ${seen}\necho "hook says no"\nexit 1\n`);
+    await chmod(hook, 0o755);
+    await writeFile(join(dir, "new-file.txt"), "hello\n");
+    await assert.rejects(commitAll(dir, "blocked by hook"), /git commit failed: [\s\S]*hook says no/);
+    const { stdout } = await execFileAsync("git", ["status", "--porcelain"], { cwd: dir });
+    assert.match(stdout, /new-file\.txt/, "the edit stays in the worktree, uncommitted");
+    const env = await readFile(seen, "utf8");
+    assert.doesNotMatch(env, /leak-me-please/, "a hook never sees GITLAB_TOKEN");
+    await rm(hook);
+    assert.equal(await commitAll(dir, "now it commits"), true);
+    assert.equal(await commitAll(dir, "nothing"), false);
+  } finally {
+    process.env.GITLAB_TOKEN = old;
+    await cleanup(repo, branch);
+  }
 });

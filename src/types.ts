@@ -105,6 +105,8 @@ export type AgentRole = "pm" | "dev" | "reviewer";
 export interface GateSpec {
   name: string;
   command: string;
+  // Per-gate time limit; absent = DEFAULT_GATE_TIMEOUT_MS (engine/verify.ts).
+  timeoutMs?: number;
   // Baseline-relative gates (typecheck/lint/test/build) pass if they're no worse than
   // before the agent's edit — correct for pre-existing repo noise, but wrong for an
   // acceptance test: it's brand new, there is no "before" to tolerate, it must
