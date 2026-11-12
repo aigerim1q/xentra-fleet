@@ -7,14 +7,33 @@ import { killProcessGroup } from "./processGroup.js";
 import { scrubSecrets } from "./secretScrub.js";
 import { openSessionLog } from "./sessionLog.js";
 
-// Denylist, not allowlist: the `claude` CLI's own auth/config env surface (PATH, HOME,
-// proxy settings, NODE_OPTIONS, whatever it reads for login state) isn't fully known
-// to this file, and an allowlist risks silently breaking it. Stripping exactly the
-// harness's own secrets by name is the precise fix for the actual threat — the agent
-// reading them back out via Bash — without touching anything `claude` itself needs.
+// What the agent, its gates and commit hooks may see of the owner's shell environment.
+// Not a pure allowlist: the `claude`/`codex` CLIs' own env surface (PATH, HOME, proxy,
+// NODE_OPTIONS, login state) isn't fully known here and an allowlist would silently
+// break them. Instead: the harness's own secrets by name (SECRET_ENV_VARS), plus every
+// variable whose NAME looks like a credential (…_TOKEN, …_SECRET, …PASSWORD…, …_API_KEY,
+// AWS_…, …PRIVATE_KEY…), are dropped — except the engines' own credentials
+// (AGENT_ENV_KEEP_PREFIXES) and names the owner lists in AGENT_ENV_KEEP.
+export const SECRET_NAME_PATTERN = /(TOKEN|SECRET|PASSW(OR)?D|PASS$|API_?KEY|APIKEY|PRIVATE_?KEY|CREDENTIAL|ACCESS_KEY|AUTH_?KEY|^AWS_|^GH_|^NPM_|^DOCKER_|^VAULT_|_PAT$|^PAT$|^GITLAB_|^JIRA_)/i;
+export const AGENT_ENV_KEEP_PREFIXES = ["CLAUDE_", "ANTHROPIC_", "CODEX_", "OPENAI_"];
+
 export function buildAgentEnv(source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
-  const env = { ...source };
-  for (const key of SECRET_ENV_VARS) delete env[key];
+  const keep = new Set(
+    (source.AGENT_ENV_KEEP ?? "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean),
+  );
+  const env: NodeJS.ProcessEnv = {};
+  for (const [key, value] of Object.entries(source)) {
+    if ((SECRET_ENV_VARS as readonly string[]).includes(key)) continue;
+    if (keep.has(key) || AGENT_ENV_KEEP_PREFIXES.some((p) => key.startsWith(p))) {
+      env[key] = value;
+      continue;
+    }
+    if (SECRET_NAME_PATTERN.test(key)) continue;
+    env[key] = value;
+  }
   return env;
 }
 

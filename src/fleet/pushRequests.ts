@@ -1,5 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { readJsonDir, readJsonOr, writeJsonAtomic } from "./atomic.js";
 
 // Push and MR leave the machine, so they happen only on the owner's click, every time
 // (the fleet's "push only with the owner's confirmation" rule). A role asks with
@@ -35,24 +35,17 @@ function file(stateDir: string, thread: string): string {
 }
 
 export function loadPush(stateDir: string, thread: string): PushRequest | undefined {
-  try {
-    return JSON.parse(readFileSync(file(stateDir, thread), "utf8"));
-  } catch {
-    return undefined;
-  }
+  return readJsonOr<PushRequest | undefined>(file(stateDir, thread), undefined);
 }
 
 export function savePush(stateDir: string, req: PushRequest): void {
-  mkdirSync(join(stateDir, "push"), { recursive: true });
-  writeFileSync(file(stateDir, req.thread), JSON.stringify(req, null, 2));
+  writeJsonAtomic(file(stateDir, req.thread), req);
 }
 
+// A half-written or corrupt request file is skipped, not fatal: the bot's status line
+// and the console list every push, and one bad file must not hide the rest.
 export function listPushes(stateDir: string): PushRequest[] {
-  const dir = join(stateDir, "push");
-  if (!existsSync(dir)) return [];
-  return readdirSync(dir)
-    .filter((f) => f.endsWith(".json"))
-    .map((f) => JSON.parse(readFileSync(join(dir, f), "utf8")) as PushRequest);
+  return readJsonDir<PushRequest>(join(stateDir, "push")).filter((p) => p && typeof p.thread === "string");
 }
 
 // A new request keeps the thread's MR (a second push updates the same MR).

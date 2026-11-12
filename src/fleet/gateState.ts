@@ -1,5 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { readJsonOr, writeJsonAtomic } from "./atomic.js";
 import type { Verdict } from "./mergeBot.js";
 
 // The last gate run per thread, pinned to the commit it ran on — shown to the owner in a
@@ -20,21 +20,11 @@ function file(stateDir: string, thread: string): string {
 }
 
 export function saveGateRun(stateDir: string, thread: string, run: GateRun): void {
-  mkdirSync(join(stateDir, "gates"), { recursive: true });
-  const p = file(stateDir, thread);
-  const tmp = `${p}.${process.pid}.tmp`;
-  writeFileSync(tmp, JSON.stringify(run, null, 2));
-  renameSync(tmp, p);
+  writeJsonAtomic(file(stateDir, thread), run);
 }
 
 export function loadGateRun(stateDir: string, thread: string): GateRun | undefined {
-  const p = file(stateDir, thread);
-  if (!existsSync(p)) return undefined;
-  try {
-    return JSON.parse(readFileSync(p, "utf8")) as GateRun;
-  } catch {
-    return undefined;
-  }
+  return readJsonOr<GateRun | undefined>(file(stateDir, thread), undefined);
 }
 
 // Lines for the owner: what the gates and every auditor say about exactly this commit.

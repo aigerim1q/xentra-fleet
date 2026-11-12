@@ -28,3 +28,31 @@ test("buildAgentEnv works on an env with none of the secret keys present", () =>
   const env = buildAgentEnv({ PATH: "/usr/bin" });
   assert.deepEqual(env, { PATH: "/usr/bin" });
 });
+
+test("buildAgentEnv drops every credential-looking name, keeps the engines' own and the owner's explicit exceptions", () => {
+  const env = buildAgentEnv({
+    PATH: "/usr/bin",
+    HOME: "/home/x",
+    LANG: "ru_RU.UTF-8",
+    NODE_OPTIONS: "--max-old-space-size=4096",
+    AWS_SECRET_ACCESS_KEY: "aws",
+    AWS_ACCESS_KEY_ID: "aws-id",
+    DB_PASSWORD: "pw",
+    NPM_TOKEN: "npm",
+    SOME_API_KEY: "k",
+    STRIPE_SECRET: "s",
+    SSH_PRIVATE_KEY_PATH: "p",
+    JIRA_BASE_URL: "https://jira",
+    CLAUDE_CODE_OAUTH_TOKEN: "claude-login",
+    ANTHROPIC_API_KEY: "anthropic",
+    OPENAI_API_KEY: "openai",
+    MY_SERVICE_TOKEN: "keep-me",
+    AGENT_ENV_KEEP: "MY_SERVICE_TOKEN",
+  });
+  for (const k of ["PATH", "HOME", "LANG", "NODE_OPTIONS", "CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "MY_SERVICE_TOKEN"]) {
+    assert.ok(k in env, `${k} must be kept`);
+  }
+  for (const k of ["AWS_SECRET_ACCESS_KEY", "AWS_ACCESS_KEY_ID", "DB_PASSWORD", "NPM_TOKEN", "SOME_API_KEY", "STRIPE_SECRET", "SSH_PRIVATE_KEY_PATH", "JIRA_BASE_URL"]) {
+    assert.ok(!(k in env), `${k} must be dropped`);
+  }
+});

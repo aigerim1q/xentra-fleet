@@ -1,5 +1,6 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { readJsonDir, readJsonOr, writeJsonAtomic } from "./atomic.js";
 import { scrubSecrets } from "../engine/secretScrub.js";
 import type { JiraComment, JiraIssueCard } from "../jira/client.js";
 import type { PipelineState } from "../gitlab.js";
@@ -40,17 +41,11 @@ export interface WatcherDeps {
 }
 
 export function addCiWatch(stateDir: string, w: Omit<CiWatch, "since">, now = new Date()): void {
-  const dir = join(stateDir, "watch-ci");
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, `${SAFE(w.thread)}.json`), JSON.stringify({ ...w, since: now.toISOString() }, null, 2));
+  writeJsonAtomic(join(stateDir, "watch-ci", `${SAFE(w.thread)}.json`), { ...w, since: now.toISOString() });
 }
 
 export function listCiWatches(stateDir: string): CiWatch[] {
-  const dir = join(stateDir, "watch-ci");
-  if (!existsSync(dir)) return [];
-  return readdirSync(dir)
-    .filter((f) => f.endsWith(".json"))
-    .map((f) => JSON.parse(readFileSync(join(dir, f), "utf8")) as CiWatch);
+  return readJsonDir<CiWatch>(join(stateDir, "watch-ci")).filter((w) => w && typeof w.thread === "string");
 }
 
 function dropCiWatch(stateDir: string, thread: string): void {
@@ -138,9 +133,9 @@ export async function pollJira(spool: Spool, stateDir: string, deps: WatcherDeps
       const card = await deps.jiraCard(key);
       const comments = await deps.jiraComments(key);
       const file = join(dir, `${SAFE(key)}.json`);
-      const prev: JiraSeen | undefined = existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : undefined;
+      const prev = readJsonOr<JiraSeen | undefined>(file, undefined);
       const lastAt = comments.at(-1)?.created;
-      writeFileSync(file, JSON.stringify({ status: card.status, lastCommentAt: lastAt } satisfies JiraSeen, null, 2));
+      writeJsonAtomic(file, { status: card.status, lastCommentAt: lastAt } satisfies JiraSeen);
       if (!prev) continue; // first look: remember, don't announce history
       const lines: string[] = [];
       if (prev.status !== card.status) lines.push(`Статус: ${prev.status} → **${card.status}**`);

@@ -1,5 +1,6 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { readJsonOr, writeJsonAtomic } from "./atomic.js";
 import type { Role } from "./roles.js";
 
 // Gate on session START, as in the CTO fleet: a running session is never interrupted;
@@ -52,19 +53,17 @@ export class FleetLimits {
   }
 
   ledger(now = new Date()): Ledger {
-    try {
-      return JSON.parse(readFileSync(this.ledgerPath(now), "utf8"));
-    } catch {
-      return { claude: { sessions: 0, costUsd: 0 }, codex: { sessions: 0, costUsd: 0 } };
-    }
+    const empty = { claude: { sessions: 0, costUsd: 0 }, codex: { sessions: 0, costUsd: 0 } };
+    const l = readJsonOr<Partial<Ledger>>(this.ledgerPath(now), {});
+    return { claude: { ...empty.claude, ...l.claude }, codex: { ...empty.codex, ...l.codex } };
   }
 
+  // The ledger is read by the bot and the console while the supervisor writes it.
   record(bucket: Bucket, costUsd: number, now = new Date()): void {
     const l = this.ledger(now);
     l[bucket].sessions += 1;
     l[bucket].costUsd += costUsd;
-    mkdirSync(join(this.stateDir, "ledger"), { recursive: true });
-    writeFileSync(this.ledgerPath(now), JSON.stringify(l, null, 2));
+    writeJsonAtomic(this.ledgerPath(now), l);
   }
 
   // --- owner controls

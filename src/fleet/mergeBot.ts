@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseReviewResponse, parseVerdictLine } from "../engine/review.js";
+import { readJsonOr, writeJsonAtomic } from "./atomic.js";
 import type { PipelineState } from "../gitlab.js";
 import { Spool, send } from "./mail.js";
 import { listPushes, type PushRequest } from "./pushRequests.js";
@@ -34,11 +35,7 @@ function verdictFile(stateDir: string, thread: string): string {
 }
 
 export function loadVerdicts(stateDir: string, thread: string): Record<string, Verdict> {
-  try {
-    return JSON.parse(readFileSync(verdictFile(stateDir, thread), "utf8"));
-  } catch {
-    return {};
-  }
+  return readJsonOr<Record<string, Verdict>>(verdictFile(stateDir, thread), {});
 }
 
 // An auditor's reply must end with an explicit `ВЕРДИКТ: OK` / `ВЕРДИКТ: BLOCK` line; the
@@ -52,8 +49,7 @@ export function recordVerdict(stateDir: string, thread: string, role: string, sh
   const v: Verdict = { role, sha, blocking, at: now.toISOString() };
   const all = loadVerdicts(stateDir, thread);
   all[role] = v;
-  mkdirSync(join(stateDir, "verdicts"), { recursive: true });
-  writeFileSync(verdictFile(stateDir, thread), JSON.stringify(all, null, 2));
+  writeJsonAtomic(verdictFile(stateDir, thread), all);
   return v;
 }
 
