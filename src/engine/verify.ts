@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import type { GateBaseline, GateResult, GateSpec, VerifyResult } from "../types.js";
-import { buildAgentEnv } from "./claudeEngine.js";
+import { buildRepoCodeEnv } from "./claudeEngine.js";
 import { secretValues } from "../config.js";
 import { killProcessGroup } from "./processGroup.js";
 import { scrubSecrets } from "./secretScrub.js";
@@ -20,7 +20,7 @@ const OUTPUT_CAP = 1024 * 1024 * 20;
 export function runRaw(cwd: string, command: string, timeoutMs = DEFAULT_GATE_TIMEOUT_MS): Promise<{ exitedZero: boolean; output: string; timedOut: boolean }> {
   const scrub = (text: string) => scrubSecrets(text, secretValues());
   return new Promise((resolve) => {
-    const child = spawn(command, { cwd, shell: true, detached: true, env: buildAgentEnv(), stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(command, { cwd, shell: true, detached: true, env: buildRepoCodeEnv(), stdio: ["ignore", "pipe", "pipe"] });
     let out = "";
     const append = (chunk: Buffer) => {
       out += chunk.toString();

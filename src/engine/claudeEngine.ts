@@ -17,6 +17,19 @@ import { openSessionLog } from "./sessionLog.js";
 export const SECRET_NAME_PATTERN = /(TOKEN|SECRET|PASSW(OR)?D|PASS$|API_?KEY|APIKEY|PRIVATE_?KEY|CREDENTIAL|ACCESS_KEY|AUTH_?KEY|^AWS_|^GH_|^NPM_|^DOCKER_|^VAULT_|_PAT$|^PAT$|^GITLAB_|^JIRA_)/i;
 export const AGENT_ENV_KEEP_PREFIXES = ["CLAUDE_", "ANTHROPIC_", "CODEX_", "OPENAI_"];
 
+// Env for code taken from the repository the agent edits — gate commands and commit
+// hooks. Same scrub as buildAgentEnv, but without the engines' exemption: tests and hooks
+// never need the Claude/Codex/OpenAI credentials, so credential-looking names under those
+// prefixes are dropped too (non-secret ones such as CLAUDE_CONFIG_DIR stay).
+export function buildRepoCodeEnv(source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const env = buildAgentEnv(source);
+  const keep = new Set((source.AGENT_ENV_KEEP ?? "").split(",").map((s) => s.trim()).filter(Boolean));
+  for (const key of Object.keys(env)) {
+    if (!keep.has(key) && AGENT_ENV_KEEP_PREFIXES.some((p) => key.startsWith(p)) && SECRET_NAME_PATTERN.test(key)) delete env[key];
+  }
+  return env;
+}
+
 export function buildAgentEnv(source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
   const keep = new Set(
     (source.AGENT_ENV_KEEP ?? "")

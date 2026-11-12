@@ -3,7 +3,7 @@ import { promisify } from "node:util";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { symlink, access } from "node:fs/promises";
-import { buildAgentEnv } from "./claudeEngine.js";
+import { buildRepoCodeEnv } from "./claudeEngine.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -128,7 +128,7 @@ export async function deleteBranch(repoPath: string, branchName: string): Promis
 // to commit" would leave the agent's edits uncommitted and unnoticed. Hooks run with the
 // agent's token-free env: they execute code from the repository, which the agent edits.
 export async function commitAll(worktreeDir: string, message: string): Promise<boolean> {
-  const env = buildAgentEnv();
+  const env = buildRepoCodeEnv();
   await execFileAsync("git", ["add", "-A"], { cwd: worktreeDir, env });
   const { stdout: status } = await execFileAsync("git", ["status", "--porcelain"], { cwd: worktreeDir, env });
   if (!status.trim()) return false;
