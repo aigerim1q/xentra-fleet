@@ -604,6 +604,10 @@ export class Supervisor {
       });
     }
 
+    // A role that ordered the gates has taken the letters into work: the gate result comes
+    // back into the same thread and resumes the session, so re-running the letter would be
+    // a duplicate session, not a retry.
+    if (outcome.actions.gates) for (const l of letters) answered.add(l.id);
     for (const l of letters) {
       if (answered.has(l.id)) {
         archive(spool, role.mail, l.id);

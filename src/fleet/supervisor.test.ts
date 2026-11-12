@@ -132,6 +132,21 @@ test("<gates/> runs the gates and mails the result back to the role, capped per 
   assert.equal(readInbox(spool, "xentra/dev-1").length, 0);
 });
 
+test("a reply that only orders <gates/> takes the letter into work: no retry, the gate result continues the thread", async () => {
+  const calls: string[] = [];
+  const { sup, inputs } = supervisor(
+    [role("dev-1", "edit")],
+    (i) => (i.batch.primary.from === FLEET_ADDRESS ? `<ack id="${i.batch.primary.id}"/>` : "<gates/>"),
+    calls,
+  );
+  const l = send(spool, { from: OWNER_ADDRESS, to: ["xentra/dev-1"], subject: "do it", body: "" });
+  await drain(sup);
+  assert.equal(inputs.filter((i) => i.batch.primary.id === l.id).length, 1, "the owner's letter is not re-run");
+  assert.equal(calls.filter((c) => c === "gates").length, 1);
+  assert.equal(readInbox(spool, "xentra/dev-1").length, 0);
+  assert.ok(!readInbox(spool, OWNER_ADDRESS).some((x) => x.subject.startsWith("Не выполнено")));
+});
+
 test("a bad address in a reply is reported back to the role instead of failing the session", async () => {
   let first = true;
   const { sup } = supervisor([role("pm")], (i) => {
