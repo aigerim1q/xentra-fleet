@@ -214,7 +214,7 @@ function renderRoles() {
   const rows = roles.map((r) => h('tr', {},
     h('td', {}, h('b', {}, r.name), h('div', { class: 'muted' }, r.role)),
     h('td', {}, r.engine + ' / ' + r.model), h('td', {}, r.access),
-    h('td', {}, pill(r.state, r.state === 'работает' ? 'ok' : r.state === 'пауза' ? 'warn' : ''),
+    h('td', {}, pill(r.state === 'проверки' ? '🧪 проверки' : r.state, r.state === 'работает' || r.state === 'проверки' ? 'ok' : r.state === 'пауза' ? 'warn' : ''),
       r.state === 'работает' ? h('button', { class: 'act', title: 'Убить текущую сессию роли; правки сохранятся WIP-коммитом', onclick: async () => { if (confirm('Прервать сессию ' + r.name + '?')) await post('kill', { role: r.role }); } }, '⛔ Прервать') : null),
     h('td', {}, String(r.inbox)),
     h('td', {}, r.current ? h('span', { class: 'link' }, r.current.title) : h('span', { class: 'muted' }, '—')),

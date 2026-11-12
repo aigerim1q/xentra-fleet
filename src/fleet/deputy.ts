@@ -51,6 +51,18 @@ export function fleetSnapshot(spool: Spool, stateDir: string, roles: Role[], now
         })
     : [];
   lines.push(`Сейчас работают: ${running.length ? running.join("; ") : "никто"}`);
+  const gating = existsSync(stateDir)
+    ? readdirSync(stateDir)
+        .filter((f) => f.startsWith("gating."))
+        .map((f) => {
+          try {
+            return `${f.slice(7)} — тред ${JSON.parse(readFileSync(join(stateDir, f), "utf8")).thread}`;
+          } catch {
+            return f.slice(7);
+          }
+        })
+    : [];
+  if (gating.length) lines.push(`Идут проверки (typecheck/тесты/сборка): ${gating.join("; ")}`);
 
   const queues = roles.map((r) => [r.role, readInbox(spool, r.mail).filter((l) => !l.kind).length] as const).filter(([, n]) => n > 0);
   lines.push(`Очереди: ${queues.length ? queues.map(([r, n]) => `${r} ${n}`).join(", ") : "пусто"}`);

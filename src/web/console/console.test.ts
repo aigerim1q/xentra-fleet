@@ -154,3 +154,15 @@ test("HTTP: page carries the token and a strict CSP; actions need the token; unk
     server.close();
   }
 });
+
+test("a role whose gates are running shows «проверки» on its thread, not «свободна»", async () => {
+  const c = await ctx();
+  const { send } = await import("../../fleet/mail.js");
+  const { rolesView, tasksView } = await import("./data.js");
+  const task = send(c.spool, { from: "xentra/owner", to: ["xentra/pm"], subject: "Токены", body: "сделай", key: "XEN-41" });
+  writeFileSync(join(c.stateDir, "gating.dev-1"), JSON.stringify({ thread: task.thread, startedAt: new Date().toISOString() }));
+  const dev = rolesView(c).find((r) => r.role === "dev-1")!;
+  assert.equal(dev.state, "проверки");
+  assert.equal(dev.current!.title, "XEN-41 · Токены");
+  assert.deepEqual(tasksView(c)[0].working, ["Разработчик 1 — проверки"]);
+});

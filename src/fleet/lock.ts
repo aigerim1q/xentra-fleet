@@ -52,6 +52,8 @@ export interface RunningSession {
 export function cleanStaleRunning(stateDir: string, log?: (line: string) => void): RunningSession[] {
   if (!existsSync(stateDir)) return [];
   const out: RunningSession[] = [];
+  // gating.<role>: gates of a previous supervisor — their process group died with it.
+  for (const f of readdirSync(stateDir).filter((f) => f.startsWith("gating."))) rmSync(join(stateDir, f), { force: true });
   for (const f of readdirSync(stateDir).filter((f) => f.startsWith("running."))) {
     const role = f.slice("running.".length);
     let info: RunningSession = { role };

@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, watch, writeFileSync, type FSWatcher } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, type FSWatcher, watch, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pickBatch, type Batch } from "./gate.js";
 import { isHeld, placeHold, quarantine, recentRoleLetters, shouldHold } from "./loopGuard.js";
@@ -531,7 +531,15 @@ export class Supervisor {
           repo: batch.repo,
         });
       } else {
-        const g = await this.o.workspace.gates(repo, cwd);
+        // gating.<role>: the console, /fleet_status and the deputy show "проверки" — gates
+        // can run for minutes with no agent session, and the fleet looked idle.
+        const gatingFile = join(this.o.stateDir, `gating.${role.role}`);
+        try {
+          writeFileSync(gatingFile, JSON.stringify({ thread: batch.thread, startedAt: new Date().toISOString() }));
+        } catch {
+          /* best-effort */
+        }
+        const g = await this.o.workspace.gates(repo, cwd).finally(() => rmSync(gatingFile, { force: true }));
         saveGateRun(this.o.stateDir, batch.thread, { sha, passed: g.passed, at: new Date().toISOString(), gates: g.gates.map((x) => ({ name: x.name, passed: x.passed })) });
         const summary = g.gates.map((x) => `- ${x.name}: ${x.passed ? "✅" : "❌"}`).join("\n");
         send(spool, {

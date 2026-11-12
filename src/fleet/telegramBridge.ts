@@ -452,6 +452,15 @@ export function installOwnerBridge(
           })
       : [];
     lines.push(...running);
+    if (existsSync(stateDir))
+      for (const f of readdirSync(stateDir).filter((f) => f.startsWith("gating."))) {
+        try {
+          const r = JSON.parse(readFileSync(join(stateDir, f), "utf8"));
+          lines.push(`   🧪 ${roleName(f.slice(7))} — проверки: ${title(r.thread)} (с ${new Date(r.startedAt).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })})`);
+        } catch {
+          lines.push(`   🧪 ${roleName(f.slice(7))} — проверки`);
+        }
+      }
     const queue = loadRoles()
       .map((r) => [roleName(r.role), readInbox(spool, r.mail).filter((l) => !l.kind).length] as const)
       .filter(([, n]) => n > 0);

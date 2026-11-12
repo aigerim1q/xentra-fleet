@@ -66,7 +66,7 @@ export interface RoleRow {
   model: string;
   engine: string;
   access: string;
-  state: "работает" | "свободна" | "пауза";
+  state: "работает" | "проверки" | "свободна" | "пауза";
   inbox: number;
   current?: { thread: string; title: string; startedAt: string };
   sessionsToday: number;
@@ -82,6 +82,8 @@ export function rolesView(ctx: ConsoleCtx): RoleRow[] {
   const fleetPaused = ctx.limits.isFleetPaused();
   return ctx.roles.map((r) => {
     const running = readJson<{ thread: string; startedAt: string }>(join(ctx.stateDir, `running.${r.role}`));
+    const gating = running ? undefined : readJson<{ thread: string; startedAt: string }>(join(ctx.stateDir, `gating.${r.role}`));
+    const busy = running ?? gating;
     const mine = sessions.filter((s) => s.role === r.role);
     return {
       role: r.role,
@@ -89,9 +91,9 @@ export function rolesView(ctx: ConsoleCtx): RoleRow[] {
       model: r.model,
       engine: r.engine,
       access: r.access === "edit" ? "правка" : "чтение",
-      state: running ? "работает" : fleetPaused || paused.has(r.role) ? "пауза" : "свободна",
+      state: running ? "работает" : gating ? "проверки" : fleetPaused || paused.has(r.role) ? "пауза" : "свободна",
       inbox: readInbox(ctx.spool, r.mail).filter((l) => !l.kind).length,
-      current: running ? { thread: running.thread, title: threadTitle(ctx.spool, running.thread), startedAt: running.startedAt } : undefined,
+      current: busy ? { thread: busy.thread, title: threadTitle(ctx.spool, busy.thread), startedAt: busy.startedAt } : undefined,
       sessionsToday: mine.length,
       costToday: mine.reduce((a, s) => a + (s.costUsd || 0), 0),
     };
@@ -184,8 +186,12 @@ export function tasksView(ctx: ConsoleCtx, days = 14): TaskRow[] {
   }
   const running = existsSync(ctx.stateDir)
     ? readdirSync(ctx.stateDir)
-        .filter((f) => f.startsWith("running."))
-        .map((f) => ({ role: f.slice(8), thread: readJson<{ thread: string }>(join(ctx.stateDir, f))?.thread }))
+        .filter((f) => f.startsWith("running.") || f.startsWith("gating."))
+        .map((f) => {
+          const gating = f.startsWith("gating.");
+          const role = f.slice(gating ? 7 : 8);
+          return { role: gating ? `${role}:gates` : role, thread: readJson<{ thread: string }>(join(ctx.stateDir, f))?.thread };
+        })
     : [];
   const ownerInbox = new Set(readInbox(ctx.spool, OWNER_ADDRESS).filter((l) => !l.kind).map((l) => l.thread));
   const holds = new Set(listHolds(ctx.spool));
@@ -203,7 +209,7 @@ export function tasksView(ctx: ConsoleCtx, days = 14): TaskRow[] {
       lastAt: new Date(letterTime(last)).toISOString(),
       last: { from: roleName(last.from), to: last.to.map(roleName).join(", "), subject: last.subject },
       letters: sorted.length,
-      working: running.filter((r) => r.thread === thread).map((r) => roleName(r.role)),
+      working: running.filter((r) => r.thread === thread).map((r) => (r.role.endsWith(":gates") ? `${roleName(r.role.slice(0, -6))} — проверки` : roleName(r.role))),
       waitingOwner: ownerInbox.has(thread),
       push: p ? { status: p.status, mr: p.mr } : undefined,
       held: holds.has(thread),

@@ -487,3 +487,29 @@ test("<delete> from a read-only role is refused, nothing is removed", async () =
   assert.ok(!calls.some((c) => c.startsWith("remove ")));
   assert.ok(thread(spool, task.thread).some((l) => l.from === FLEET_ADDRESS && /только разработчик/.test(l.body)));
 });
+
+test("while <gates/> run, gating.<role> marks the role busy; the marker is gone afterwards", async () => {
+  let seen = false;
+  const sup = new Supervisor({
+    spool,
+    roles: [role("dev-1", "edit")],
+    repos,
+    stateDir,
+    workspace: {
+      ...ws(),
+      gates: async () => {
+        seen = existsSync(join(stateDir, "gating.dev-1"));
+        return { passed: true, output: "", gates: [] };
+      },
+    },
+    backoff: BACKOFF,
+    runSession: async (input): Promise<SessionOutcome> => {
+      const text = input.batch.primary.from === OWNER_ADDRESS ? "<gates/>" : `<ack id="${input.batch.primary.id}"/>`;
+      return { ok: true, actions: parseReplyActions(text), resultText: text, costUsd: 0 };
+    },
+  });
+  send(spool, { from: OWNER_ADDRESS, to: ["xentra/dev-1"], subject: "x", body: "" });
+  await drain(sup);
+  assert.ok(seen, "gating marker present during the gate run");
+  assert.ok(!existsSync(join(stateDir, "gating.dev-1")));
+});
