@@ -4,8 +4,8 @@ import { pickBatch, type Batch } from "./gate.js";
 import { isHeld, placeHold, quarantine, recentRoleLetters, shouldHold } from "./loopGuard.js";
 import { ack, archive, moveToInbox, readInbox, send, sentBy, thread as threadLetters, type Letter, type Spool } from "./mail.js";
 import { OWNER_ADDRESS, poolAddresses, senderAllowed, type Role } from "./roles.js";
-import { readThreadState } from "./session.js";
-import type { SessionRunner } from "./session.js";
+import { describeChanges, readThreadState } from "./session.js";
+import type { SessionRunner, ThreadChanges } from "./session.js";
 import type { FleetLimits } from "./limits.js";
 import { appendMemory, memoryPromptBlock } from "./memory.js";
 import { branchFor } from "./workspace.js";
@@ -53,6 +53,7 @@ export interface WorkspaceOps {
   gates(repo: RepoTarget, dir: string): Promise<{ passed: boolean; output: string; gates: Array<{ name: string; passed: boolean }> }>;
   diffStat(dir: string, baseBranch: string): Promise<string>;
   headSha(dir: string): Promise<string>;
+  changes(dir: string, baseBranch: string): Promise<{ head: string; stat: string; text: string }>;
 }
 
 export interface SupervisorOptions {
@@ -324,10 +325,19 @@ export class Supervisor {
     const keys = [...new Set(letters.map((l) => l.key).filter((k): k is string => !!k))];
     const extra = this.o.threadContext?.(batch.thread, role);
     const memory = [memoryPromptBlock(this.o.stateDir, batch.thread, keys), extra].filter(Boolean).join("\n\n");
+    // Roles without a shell can't run git: the thread's diff and head go into the prompt.
+    let changes: ThreadChanges | undefined;
+    if (role.access === "read") {
+      const raw = await this.o.workspace.changes(cwd, repo.baseBranch).catch((err) => {
+        this.log(`${role.role}: diff for the prompt failed: ${(err as Error).message}`);
+        return undefined;
+      });
+      if (raw) changes = describeChanges(raw, repo.baseBranch);
+    }
     let outcome;
     const t0 = Date.now();
     try {
-      outcome = await this.o.runSession({ role, batch, cwd, stateDir: this.o.stateDir, history, memory });
+      outcome = await this.o.runSession({ role, batch, cwd, stateDir: this.o.stateDir, history, memory, changes });
     } finally {
       rmSync(runningFile, { force: true });
     }

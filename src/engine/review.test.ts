@@ -95,3 +95,10 @@ test("formatReviewRound reports the turn's own failure reason instead of guessin
   const text = formatReviewRound([], "ход завершился ошибкой: timeout");
   assert.match(text, /Ревью не удалось провести: ход завершился ошибкой: timeout/);
 });
+
+test("a cut diff tells the reviewer it is cut and how much is missing; a short one carries no such note", async () => {
+  const { REVIEW_DIFF_CHARS } = await import("./review.js");
+  const long = buildReviewPrompt(task, "x".repeat(REVIEW_DIFF_CHARS + 500));
+  assert.match(long, new RegExp(`Diff обрезан: показаны первые ${REVIEW_DIFF_CHARS} из ${REVIEW_DIFF_CHARS + 500} символов`));
+  assert.doesNotMatch(buildReviewPrompt(task, "short diff"), /обрезан/);
+});

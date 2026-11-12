@@ -118,6 +118,26 @@ export async function workspaceDiff(dir: string, baseBranch: string): Promise<st
   return stdout.trim();
 }
 
+export interface WorkspaceChanges {
+  head: string;
+  stat: string;
+  text: string;
+}
+
+// What the thread changed against the base (committed work: the supervisor commits after
+// every edit session). Read-only roles get this in their prompt — they have no shell to
+// run git themselves.
+export async function workspaceChanges(dir: string, baseBranch: string): Promise<WorkspaceChanges> {
+  const git = (args: string[]) => execFileAsync("git", args, { cwd: dir, maxBuffer: 1024 * 1024 * 20 }).then((r) => r.stdout);
+  const head = (await git(["rev-parse", "HEAD"])).trim();
+  const base = await git(["rev-parse", "--verify", "--quiet", `origin/${baseBranch}`])
+    .then(() => `origin/${baseBranch}`)
+    .catch(() => baseBranch);
+  const stat = (await git(["diff", `${base}...HEAD`, "--stat"]).catch(() => "")).trim();
+  const text = stat ? await git(["diff", `${base}...HEAD`]).catch(() => "") : "";
+  return { head, stat, text };
+}
+
 export async function workspaceHead(dir: string): Promise<string> {
   const { stdout } = await execFileAsync("git", ["rev-parse", "HEAD"], { cwd: dir });
   return stdout.trim();

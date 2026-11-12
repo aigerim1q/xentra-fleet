@@ -15,11 +15,16 @@ export interface ReviewOutcome {
 // a test for, convention violations.
 // Shared by both reviewers (Claude here, Codex in codexReview.ts) so they judge the
 // exact same task, criteria and diff — only the answer format differs.
+// The embedded diff is capped; a cut diff says so, with the size, so the reviewer reads
+// the rest in the worktree instead of taking a partial view for the whole change.
+export const REVIEW_DIFF_CHARS = 8000;
+
 export function buildReviewBrief(task: TaskSpec, diffText: string): string[] {
   const criteria =
     task.acceptanceCriteria.length > 0
       ? task.acceptanceCriteria.map((c, i) => `${i + 1}. ${c}`).join("\n")
       : "(не зафиксированы для этой задачи)";
+  const truncated = diffText.length > REVIEW_DIFF_CHARS;
   return [
     `Задача ${task.id}: ${task.title}`,
     "",
@@ -30,8 +35,13 @@ export function buildReviewBrief(task: TaskSpec, diffText: string): string[] {
     "",
     "Изменения (diff), уже прошедшие typecheck/lint/build/тесты:",
     "```diff",
-    diffText.slice(0, 8000),
+    truncated ? diffText.slice(0, REVIEW_DIFF_CHARS) : diffText,
     "```",
+    ...(truncated
+      ? [
+          `⚠️ Diff обрезан: показаны первые ${REVIEW_DIFF_CHARS} из ${diffText.length} символов. Остальные изменения прочитай в рабочей копии (git недоступен — открывай файлы) и не считай непоказанное проверенным.`,
+        ]
+      : []),
     "",
     "Ты — независимый ревьюер. Найди то, что НЕ поймали автоматические проверки:",
     "архитектурные проблемы, уязвимости, граничные случаи без покрытия, нарушение",

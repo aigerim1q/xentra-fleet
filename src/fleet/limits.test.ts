@@ -69,7 +69,7 @@ test("a blocked role keeps its letters and burns no attempts", withDir(async (di
     repos: { backend: { kind: "backend", path: "/r", baseBranch: "dev", gates: [] }, frontend: undefined },
     stateDir: join(dir, "state"),
     limits,
-    workspace: { ensure: async () => dir, commit: async () => false, gates: async () => ({ passed: true, output: "", gates: [] }), diffStat: async () => "", headSha: async () => "sha1" },
+    workspace: { ensure: async () => dir, commit: async () => false, gates: async () => ({ passed: true, output: "", gates: [] }), diffStat: async () => "", headSha: async () => "sha1", changes: async () => ({ head: "sha1", stat: "", text: "" }) },
     runSession: async (i) => {
       sessions++;
       const t = `<ack id="${i.batch.primary.id}"/>`;

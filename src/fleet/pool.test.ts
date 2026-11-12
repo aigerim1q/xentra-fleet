@@ -21,7 +21,7 @@ function make(dir: string, roles = [dev("dev-1"), dev("dev-2")], limits?: FleetL
     repos: { backend: { kind: "backend", path: "/r", baseBranch: "dev", gates: [] }, frontend: undefined },
     stateDir: join(dir, "state"),
     limits,
-    workspace: { ensure: async () => dir, commit: async () => false, gates: async () => ({ passed: true, output: "", gates: [] }), diffStat: async () => "", headSha: async () => "s" },
+    workspace: { ensure: async () => dir, commit: async () => false, gates: async () => ({ passed: true, output: "", gates: [] }), diffStat: async () => "", headSha: async () => "s", changes: async () => ({ head: "s", stat: "", text: "" }) },
     runSession: async (i) => {
       inputs.push(i);
       await new Promise((r) => setTimeout(r, 10));

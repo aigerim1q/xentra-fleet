@@ -33,6 +33,7 @@ const ws = (calls: string[] = []): WorkspaceOps => ({
   },
   diffStat: async () => " src/a.ts | 2 +-\n 1 file changed",
   headSha: async () => "sha1",
+  changes: async () => ({ head: "sha1", stat: " src/a.ts | 2 +-\n 1 file changed", text: "diff --git a/src/a.ts b/src/a.ts\n+changed" }),
 });
 
 const repos = { backend: { kind: "backend" as const, path: "/repo", baseBranch: "dev", gates: [] }, frontend: undefined };
@@ -256,4 +257,16 @@ test("an engine limit error pauses the fleet and tells the owner; the letter wai
   assert.equal(owner.length, 1);
   assert.match(owner[0].subject, /Флот на паузе/);
   assert.match(owner[0].body, /out of usage credits/);
+});
+
+test("roles without a shell get the thread's diff and head sha in their session input; editing roles don't", async () => {
+  const { sup, inputs } = supervisor([role("auditor"), role("dev-1", "edit")], (i) => `<ack id="${i.batch.primary.id}"/>`);
+  send(spool, { from: OWNER_ADDRESS, to: ["xentra/auditor", "xentra/dev-1"], subject: "review", body: "" });
+  await drain(sup);
+  const auditor = inputs.find((i) => i.role.role === "auditor")!;
+  assert.equal(auditor.changes?.head, "sha1");
+  assert.match(auditor.changes!.stat, /src\/a\.ts/);
+  assert.match(auditor.changes!.text, /\+changed/);
+  assert.equal(auditor.changes!.truncated, false);
+  assert.equal(inputs.find((i) => i.role.role === "dev-1")!.changes, undefined);
 });

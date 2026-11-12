@@ -29,6 +29,36 @@ export interface SessionOutcome {
   costUsd: number;
 }
 
+// The thread's diff against the base, as shown to roles without a shell (auditor, tester,
+// pm). Capped: a cut diff says so explicitly, so the reader never mistakes a part for the whole.
+export interface ThreadChanges {
+  head: string;
+  baseBranch: string;
+  stat: string;
+  text: string;
+  truncated: boolean;
+  totalChars: number;
+}
+
+export const DIFF_PROMPT_CHARS = 60_000;
+
+export function describeChanges(raw: { head: string; stat: string; text: string }, baseBranch: string, maxChars = DIFF_PROMPT_CHARS): ThreadChanges {
+  const truncated = raw.text.length > maxChars;
+  return {
+    head: raw.head,
+    baseBranch,
+    stat: raw.stat,
+    text: truncated ? raw.text.slice(0, maxChars) : raw.text,
+    truncated,
+    totalChars: raw.text.length,
+  };
+}
+
+export function truncationNote(c: { truncated: boolean; text: string; totalChars: number }): string | undefined {
+  if (!c.truncated) return undefined;
+  return `⚠️ Diff обрезан: показаны первые ${c.text.length} из ${c.totalChars} символов. Остальные файлы смотри в рабочей копии по списку выше — не считай непоказанное проверенным.`;
+}
+
 export interface SessionInput {
   role: Role;
   batch: Batch;
@@ -36,6 +66,7 @@ export interface SessionInput {
   stateDir: string;
   history: Letter[]; // earlier letters of the thread, for a fresh session
   memory?: string; // thread/task memory block (fleet/memory.ts), injected every session
+  changes?: ThreadChanges; // read-only roles: the thread's diff and head sha
 }
 
 export type SessionRunner = (input: SessionInput) => Promise<SessionOutcome>;
@@ -92,6 +123,17 @@ export function buildSessionPrompt(input: SessionInput, resumed: boolean): strin
     parts.push("");
   }
   if (input.memory) parts.push(input.memory, "");
+  if (input.changes) {
+    const c = input.changes;
+    parts.push(`Изменения треда относительно origin/${c.baseBranch} (HEAD ${c.head.slice(0, 12)}):`);
+    if (!c.stat) parts.push("(изменений относительно базы нет)", "");
+    else {
+      const note = truncationNote(c);
+      parts.push("```", c.stat, "```", "", "```diff", c.text, "```");
+      if (note) parts.push("", note);
+      parts.push("");
+    }
+  }
   parts.push(letters.length > 1 ? `Пришли письма (${letters.length}), обработай все:` : "Пришло письмо:", "");
   for (const l of letters) parts.push(formatLetter(l), "");
   parts.push(
