@@ -242,7 +242,10 @@ export function handleConsole(req: IncomingMessage, res: ServerResponse, opts: {
           } else {
             const r = await approvePush(stateDir, thread, realPushDeps);
             if (r.status === "pushed") notify(thread, r.requestedBy, "Push выполнен", `Владелец одобрил. Ветка \`${r.branch}\` запушена.${r.mr ? ` MR: ${r.mr.webUrl}` : ""}`);
-            else throw new Error(`push не удался: ${r.error}`);
+            else if (r.status === "stale") {
+              notify(thread, r.requestedBy, "Push не выполнен: ветка изменилась", `Владелец одобрил, но ${r.error}. Запроси <push/> заново, если всё ещё нужно.`);
+              throw new Error(`не пушу: ${r.error}`);
+            } else throw new Error(`push не удался: ${r.error}`);
           }
           break;
         }

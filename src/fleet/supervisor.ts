@@ -11,7 +11,8 @@ import { appendMemory, memoryPromptBlock } from "./memory.js";
 import { branchFor } from "./workspace.js";
 import { fileRequest, loadPush } from "./pushRequests.js";
 import { WATCHER_ADDRESSES, addCiWatch } from "./watchers.js";
-import { recordVerdict } from "./mergeBot.js";
+import { loadVerdicts, recordVerdict } from "./mergeBot.js";
+import { describeShaState, loadGateRun, saveGateRun } from "./gateState.js";
 import { HEARTBEAT_FILE } from "./names.js";
 import { appendFileSync } from "node:fs";
 import type { RepoTarget } from "./workspace.js";
@@ -427,6 +428,8 @@ export class Supervisor {
       problems.push(`гейты в этом треде уже запускались ${MAX_GATE_RUNS} раз — больше не запускаю; напиши pm или владельцу, что мешает`);
     } else if (outcome.actions.gates) {
       const g = await this.o.workspace.gates(repo, cwd);
+      const sha = await this.o.workspace.headSha(cwd).catch(() => "");
+      saveGateRun(this.o.stateDir, batch.thread, { sha, passed: g.passed, at: new Date().toISOString(), gates: g.gates.map((x) => ({ name: x.name, passed: x.passed })) });
       const summary = g.gates.map((x) => `- ${x.name}: ${x.passed ? "✅" : "❌"}`).join("\n");
       send(spool, {
         from: FLEET_ADDRESS,
@@ -464,6 +467,7 @@ export class Supervisor {
         if (!stat) {
           problems.push("в ветке треда нет изменений относительно базы — пушить нечего");
         } else {
+          const headSha = await this.o.workspace.headSha(cwd);
           const req = fileRequest(this.o.stateDir, {
             thread: batch.thread,
             repo: repo.kind,
@@ -473,13 +477,18 @@ export class Supervisor {
             gitlabProjectPath: repo.gitlabProjectPath,
             title: outcome.actions.push.title,
             requestedBy: role.mail,
+            headSha,
           });
+          const auditors = this.o.roles.filter((r) => r.isAuditor).map((r) => r.role);
+          const state = describeShaState(headSha, loadGateRun(this.o.stateDir, batch.thread), loadVerdicts(this.o.stateDir, batch.thread), auditors);
           send(spool, {
             from: FLEET_ADDRESS,
             to: [OWNER_ADDRESS],
             subject: `Запрос на push: ${req.title}`,
             body: [
               `${role.mail} просит запушить ветку \`${req.branch}\` (${repo.kind} → ${repo.baseBranch})${req.mr ? ` — обновит MR !${req.mr.iid}` : " и открыть MR"}.`,
+              `Коммит ${headSha.slice(0, 8)} — пуш пройдёт только для него; если ветка изменится, понадобится новый запрос.`,
+              ...state.map((l) => `- ${l}`),
               "",
               "```",
               stat.slice(0, 2500),

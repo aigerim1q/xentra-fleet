@@ -17,7 +17,11 @@ export interface PushRequest {
   title: string;
   requestedBy: string;
   requestedAt: string;
-  status: "pending" | "pushed" | "declined" | "failed";
+  // Head of the thread branch when the role asked. The owner approves THIS commit: if
+  // the branch moved by the time of the click, approve refuses ("stale") and the role
+  // has to ask again, so what gets pushed is what the owner saw.
+  headSha?: string;
+  status: "pending" | "pushed" | "declined" | "failed" | "stale";
   mr?: { iid: number; webUrl: string };
   error?: string;
   decidedAt?: string; // when the owner pushed or declined
@@ -62,12 +66,23 @@ export function fileRequest(stateDir: string, req: Omit<PushRequest, "status" | 
 export interface PushDeps {
   push(dir: string, branch: string): Promise<void>;
   createMr(r: PushRequest): Promise<{ iid: number; webUrl: string }>;
+  headSha(dir: string): Promise<string>;
 }
 
 export async function approvePush(stateDir: string, thread: string, deps: PushDeps): Promise<PushRequest> {
   const r = loadPush(stateDir, thread);
   if (!r) throw new Error(`нет запроса на push для треда ${thread}`);
   if (r.status !== "pending") throw new Error(`запрос уже обработан (${r.status})`);
+  if (r.headSha) {
+    const now = await deps.headSha(r.dir).catch(() => "");
+    if (now !== r.headSha) {
+      r.status = "stale";
+      r.error = `ветка изменилась после запроса (${r.headSha.slice(0, 8)} → ${now.slice(0, 8) || "?"}); нужен новый запрос на push`;
+      r.decidedAt = new Date().toISOString();
+      savePush(stateDir, r);
+      return r;
+    }
+  }
   try {
     await deps.push(r.dir, r.branch);
     if (!r.mr) r.mr = await deps.createMr(r);

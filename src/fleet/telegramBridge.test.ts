@@ -120,7 +120,7 @@ test("a push request shows Push/Decline buttons, and Push runs the push and tell
   const pushed: string[] = [];
   const stop = installOwnerBridge(bot, 7, {
     pollMs: 60_000,
-    pushDeps: { push: async (_d, b) => void pushed.push(b), createMr: async () => ({ iid: 3, webUrl: "https://g/mr/3" }) },
+    pushDeps: { push: async (_d, b) => void pushed.push(b), createMr: async () => ({ iid: 3, webUrl: "https://g/mr/3" }), headSha: async () => "h1" },
   });
   try {
     await new Promise((r) => setTimeout(r, 50));

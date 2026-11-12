@@ -17,7 +17,7 @@ import { approvePush, declinePush, listPushes, loadPush, type PushDeps } from ".
 import { OWNER_ADDRESS, loadRoles, poolAddresses } from "./roles.js";
 import { FLEET_ADDRESS } from "./supervisor.js";
 import { WATCHER_ADDRESSES } from "./watchers.js";
-import { fleetHome } from "./workspace.js";
+import { fleetHome, workspaceHead } from "./workspace.js";
 
 // Everything about the team (role fleet) in Telegram. The owner is the mailbox
 // xentra/owner; this bridge makes it a chat:
@@ -130,6 +130,7 @@ export function sessionCard(path: string, title: string, role: string, maxLines 
 
 export const realPushDeps: PushDeps = {
   push: (dir, branch) => pushBranch(dir, branch),
+  headSha: (dir) => workspaceHead(dir),
   createMr: async (r) => {
     const { webUrl } = await createMergeRequest({
       gitlabBaseUrl: config.gitlab.baseUrl,
@@ -256,6 +257,9 @@ export function installOwnerBridge(
       if (r.status === "pushed") {
         await ctx.reply(`🚀 Готово: ${title(thread)}${r.mr ? `\nMR: ${r.mr.webUrl}` : ""}`);
         notifyRequester(thread, r.requestedBy, "Push выполнен", `Владелец одобрил. Ветка \`${r.branch}\` запушена.${r.mr ? ` MR: ${r.mr.webUrl}` : ""}`);
+      } else if (r.status === "stale") {
+        await ctx.reply(`✋ Не пушу: ${r.error}. Зам. CTO пришлёт новый запрос с актуальным diff.`);
+        notifyRequester(thread, r.requestedBy, "Push не выполнен: ветка изменилась", `Владелец одобрил, но ${r.error}. Проверь состояние ветки и, если всё ещё нужно, запроси <push/> заново.`);
       } else {
         await ctx.reply(`❌ Push не удался: ${r.error}`);
         notifyRequester(thread, r.requestedBy, "Push не удался", `Владелец одобрил, но push/MR упал: ${r.error}`);
