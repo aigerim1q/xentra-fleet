@@ -154,9 +154,15 @@ export async function commitAll(worktreeDir: string, message: string): Promise<b
 // happened to *modify*. `-N` registers each untracked path in the index without staging
 // its content, which is enough for `git diff` (not `--cached`) to show it as an addition;
 // it doesn't change what a later `commitAll`'s own `git add -A` actually commits.
+//
+// Against the MERGE-BASE, not the base branch tip: once the base moves on (other MRs land on
+// dev), `git diff <base>` shows every file added there since as "deleted by this branch" —
+// live 2026-11-12: three fleet threads had their gates refused for «deleted tests» that were
+// in fact new specs on dev. Throws for an unknown base ref, as before.
 export async function getWorktreeDiff(worktreeDir: string, baseBranch: string): Promise<string> {
   await execFileAsync("git", ["add", "-N", "."], { cwd: worktreeDir });
-  const { stdout } = await execFileAsync("git", ["diff", "-M", baseBranch], { cwd: worktreeDir, maxBuffer: 1024 * 1024 * 10 });
+  const { stdout: mb } = await execFileAsync("git", ["merge-base", baseBranch, "HEAD"], { cwd: worktreeDir });
+  const { stdout } = await execFileAsync("git", ["diff", "-M", mb.trim()], { cwd: worktreeDir, maxBuffer: 1024 * 1024 * 10 });
   return stdout;
 }
 

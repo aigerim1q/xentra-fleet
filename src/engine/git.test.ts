@@ -449,3 +449,25 @@ test("commitAll distinguishes a failed commit (hook) from nothing to commit, and
     await cleanup(repo, branch);
   }
 });
+
+test("getWorktreeDiff ignores what landed on the base after the branch forked (no phantom deletions)", async () => {
+  const repo = await makeRepo();
+  const branch = uniqueBranch();
+  try {
+    const { stdout } = await execFileAsync("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd: repo });
+    const base = stdout.trim();
+    const dir = await createWorktree(repo, branch);
+    // The base moves on: a new spec appears there after the fork.
+    await writeFile(join(repo, "new-on-base.spec.ts"), "it('x', () => {});\n");
+    await execFileAsync("git", ["add", "-A"], { cwd: repo });
+    await execFileAsync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "base moves on"], { cwd: repo });
+    // The branch changes something of its own.
+    await writeFile(join(dir, "README.md"), "initial\nbranch change\n");
+
+    const diff = await getWorktreeDiff(dir, base);
+    assert.match(diff, /\+branch change/);
+    assert.doesNotMatch(diff, /new-on-base/);
+  } finally {
+    await cleanup(repo, branch);
+  }
+});
