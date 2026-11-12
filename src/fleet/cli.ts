@@ -18,6 +18,8 @@ import { computeMetrics, formatMetrics } from "./metrics.js";
 import { DEPUTY_THREAD, fleetSnapshot } from "./deputy.js";
 import { fleetAlive, roleName, threadTitle } from "./names.js";
 import { mergeMergeRequest } from "../gitlab.js";
+import { removeWorkspace, staleThreads } from "./cleanup.js";
+import { loadPush } from "./pushRequests.js";
 
 // `fleet …` commands: the supervisor (`run`, `once`), the owner's mailbox from the
 // terminal, echo holds and the role list.
@@ -243,6 +245,31 @@ export function registerFleetCommands(program: Command): void {
     .action((o) => {
       const since = Date.now() - Number(o.days) * 86_400_000;
       console.log(formatMetrics(computeMetrics(new Spool(), join(fleetHome(), "state"), loadRoles(), since)));
+    });
+
+  fleet
+    .command("cleanup")
+    .description("Remove worktrees (and safe-to-drop fleet/* branches) of threads quiet for N days")
+    .option("--days <n>", "quiet for at least this many days", "14")
+    .option("--dry-run", "only list what would be removed")
+    .action(async (o) => {
+      const spool = new Spool();
+      const stateDir = join(fleetHome(), "state");
+      const stale = staleThreads(spool, stateDir, loadRoles(), { days: Number(o.days) });
+      if (stale.length === 0) return void console.log("(нечего убирать)");
+      for (const s of stale) {
+        const title = threadTitle(spool, s.thread);
+        if (o.dryRun) {
+          console.log(`would remove ${s.repo}/${s.thread}  (${title}, тихо с ${new Date(s.lastLetterAt).toLocaleDateString("ru-RU")})`);
+          continue;
+        }
+        const r = config.repos[s.repo];
+        if (!r.path) continue;
+        const target: RepoTarget = { kind: s.repo, path: r.path, baseBranch: config.gitlab.targetBranch, gates: r.gates, gitlabProjectPath: r.gitlabProjectPath };
+        const pushed = loadPush(stateDir, s.thread)?.status === "pushed";
+        const res = await removeWorkspace(target, s.thread, { pushed }).catch((err) => ({ thread: s.thread, repo: s.repo, worktreeRemoved: false, branchDeleted: false, note: (err as Error).message }));
+        console.log(`${s.repo}/${s.thread}: worktree ${res.worktreeRemoved ? "removed" : "kept"}, branch ${res.branchDeleted ? "deleted" : "kept"}${res.note ? ` — ${res.note}` : ""}`);
+      }
     });
 
   fleet
