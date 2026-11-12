@@ -518,6 +518,7 @@ export async function startBot(): Promise<void> {
       kb.text(bridge.isPaused() ? "▶️ Возобновить команду" : "⏸ Пауза команды", bridge.isPaused() ? "ctl:resume" : "ctl:pause").row();
       kb.text("⚡️ Снять дневные лимиты до конца дня", "ctl:override").row();
       for (const h of bridge.holds()) kb.text(`▶️ Снять остановку: ${h.title.slice(0, 40)}`, `fleet_rel:${h.token}`).row();
+      for (const r of bridge.running()) kb.text(`⛔ Прервать: ${r.name}${r.title ? ` — ${r.title.slice(0, 30)}` : ""}`, `fleet_kill:${r.token}`).row();
     }
     kb.text("💰 Расход бота за день", "ctl:limits").row();
     kb.text("⛔ Прервать текущую работу бота", "ctl:kill").row();
@@ -525,7 +526,8 @@ export async function startBot(): Promise<void> {
     lines.push(
       "",
       "Пауза — новые сессии команды не стартуют, текущие доработают.",
-      "Прервать — остановить то, что бот делает прямо сейчас.",
+      "Прервать: <роль> — убить текущую сессию этой роли (правки сохранятся WIP-коммитом).",
+      "Прервать текущую работу бота — остановить то, что бот делает прямо сейчас.",
     );
     return { text: lines.join("\n"), keyboard: kb };
   }

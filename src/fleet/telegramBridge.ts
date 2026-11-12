@@ -8,6 +8,7 @@ import { formatEvent, listJournals, sessionInfo } from "../engine/sessionView.js
 import { createMergeRequest, getMergeRequestPipeline, mergeMergeRequest, pushBranch } from "../gitlab.js";
 import { DEPUTY_THREAD } from "./deputy.js";
 import { FleetLimits } from "./limits.js";
+import { requestKill } from "./lock.js";
 import { listHolds, releaseHold } from "./loopGuard.js";
 import { Spool, archive, findInInbox, readInbox, send, type Letter } from "./mail.js";
 import { checkReadiness, setVeto, type MergeDeps } from "./mergeBot.js";
@@ -67,6 +68,8 @@ export interface OwnerBridge {
   overrideToday(): void;
   limitsSummary(): string;
   holds(): Array<{ title: string; token: string }>;
+  // Roles with a session running now, with a token for the «прервать» button.
+  running(): Array<{ role: string; name: string; title: string; token: string }>;
 }
 
 const MAX_TG = 3800;
@@ -359,6 +362,29 @@ export function installOwnerBridge(
   };
   bot.command("fleet_metrics", showMetrics);
 
+  // --- running sessions: the owner can interrupt one (state/kill.<role>, served by the supervisor)
+  const runningRoles = (): Array<{ role: string; thread?: string }> =>
+    existsSync(stateDir)
+      ? readdirSync(stateDir)
+          .filter((f) => f.startsWith("running."))
+          .map((f) => {
+            const role = f.slice(8);
+            try {
+              return { role, thread: JSON.parse(readFileSync(join(stateDir, f), "utf8")).thread as string | undefined };
+            } catch {
+              return { role };
+            }
+          })
+      : [];
+  const running = () => runningRoles().map((r) => ({ role: r.role, name: roleName(r.role), title: r.thread ? title(r.thread) : "", token: tokenFor(r.role) }));
+  bot.callbackQuery(/^fleet_kill:(\d+)$/, async (ctx) => {
+    const role = st.tokens?.[ctx.match[1]];
+    if (!role || !runningRoles().some((r) => r.role === role)) return void (await ctx.answerCallbackQuery({ text: "Эта роль уже ничего не делает", show_alert: true }));
+    requestKill(stateDir, role);
+    await ctx.answerCallbackQuery({ text: "Прерываю…" });
+    await ctx.reply(`⛔ Прерываю сессию: ${roleName(role)}. Незаконченные правки сохранятся WIP-коммитом, письмо вернётся отправителю как «Не выполнено».`);
+  });
+
   // --- holds (threads stopped by the echo guard)
   const holds = () => listHolds(spool).map((t) => ({ title: title(t), token: tokenFor(t) }));
   bot.callbackQuery(/^fleet_rel:(\d+)$/, async (ctx) => {
@@ -454,6 +480,11 @@ export function installOwnerBridge(
       const h = holds();
       saveState(st);
       return h;
+    },
+    running: () => {
+      const r = running();
+      saveState(st);
+      return r;
     },
   };
 }

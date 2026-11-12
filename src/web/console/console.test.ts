@@ -141,6 +141,15 @@ test("HTTP: page carries the token and a strict CSP; actions need the token; unk
     const { FleetLimits } = await import("../../fleet/limits.js");
     assert.equal(new FleetLimits(join(home, "state")).isFleetPaused(), true);
     assert.equal((await fetch(`${base}/elsewhere`)).status, 418);
+
+    // interrupt: only a role with a session running, and only with the token
+    const kill = (role: string) => fetch(`${base}/api/console/kill`, { method: "POST", headers: { "x-dashboard-token": TOKEN, "content-type": "application/json" }, body: JSON.stringify({ role }) });
+    assert.equal((await kill("dev-1")).status, 400, "nothing running");
+    assert.equal((await kill("nobody")).status, 400);
+    writeFileSync(join(home, "state", "running.dev-1"), JSON.stringify({ thread: "t", startedAt: "x" }));
+    assert.equal((await kill("dev-1")).status, 200);
+    const { existsSync } = await import("node:fs");
+    assert.ok(existsSync(join(home, "state", "kill.dev-1")));
   } finally {
     server.close();
   }

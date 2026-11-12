@@ -326,3 +326,30 @@ test("a letter that cannot be forwarded is skipped after a few tries instead of 
     stop.stop();
   }
 });
+
+test("«прервать» for a running role: listed with a token, and the tap files a kill request for the supervisor", async () => {
+  const { mkdirSync, writeFileSync, existsSync: ex, rmSync: rmf } = await import("node:fs");
+  const spool = new Spool();
+  spool.register(OWNER_ADDRESS);
+  spool.register("xentra/pm");
+  const task = send(spool, { from: OWNER_ADDRESS, to: ["xentra/pm"], subject: "Фильтр", body: "", key: "XEN-3" });
+  const stateDir = join(home, "state");
+  mkdirSync(stateDir, { recursive: true });
+  writeFileSync(join(stateDir, "running.dev-2"), JSON.stringify({ thread: task.thread, startedAt: new Date().toISOString(), pid: 1 }));
+  const { bot, sent, tap } = fakeBot();
+  const bridge = installOwnerBridge(bot, 7, { pollMs: 60_000 });
+  try {
+    const running = bridge.running();
+    assert.equal(running.length, 1);
+    assert.equal(running[0].name, "Разработчик 2");
+    assert.match(running[0].title, /XEN-3/);
+    await bot.handleUpdate(tap(`fleet_kill:${running[0].token}`));
+    assert.ok(ex(join(stateDir, "kill.dev-2")), "kill request filed");
+    assert.match(sent.at(-1)!.text, /Прерываю сессию: Разработчик 2/);
+    rmf(join(stateDir, "running.dev-2"), { force: true });
+    await bot.handleUpdate(tap(`fleet_kill:${running[0].token}`)); // no longer running: refused, no crash
+  } finally {
+    rmf(join(stateDir, "kill.dev-2"), { force: true });
+    bridge.stop();
+  }
+});

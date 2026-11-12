@@ -1,6 +1,6 @@
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { runClaudeTurn, TurnTimeoutError } from "../engine/claudeEngine.js";
+import { runClaudeTurn, TurnKilledError, TurnTimeoutError } from "../engine/claudeEngine.js";
 import { runCodexExec } from "../engine/codexReview.js";
 import { buildDisallowedTools, withAlwaysDisallowed } from "../engine/guardrails.js";
 import { withTaskLogScope } from "../engine/sessionLog.js";
@@ -67,6 +67,7 @@ export interface SessionInput {
   history: Letter[]; // earlier letters of the thread, for a fresh session
   memory?: string; // thread/task memory block (fleet/memory.ts), injected every session
   changes?: ThreadChanges; // read-only roles: the thread's diff and head sha
+  onChild?: (pid: number) => void; // the agent process was spawned (for running.<role>)
 }
 
 export type SessionRunner = (input: SessionInput) => Promise<SessionOutcome>;
@@ -153,6 +154,8 @@ export const runRoleSession: SessionRunner = async (input) => {
       model: role.model,
       effort: role.effort ?? "high",
       timeoutMs: role.sessionTimeoutMs,
+      label: role.role,
+      onSpawn: input.onChild,
     });
     if ("error" in run) return { ok: false, actions: parseReplyActions(""), resultText: "", error: run.error, costUsd: 0 };
     return { ok: true, actions: parseReplyActions(run.text), resultText: run.text, costUsd: 0 };
@@ -172,6 +175,7 @@ export const runRoleSession: SessionRunner = async (input) => {
         model: role.model,
         turnTimeoutMs: role.sessionTimeoutMs,
         logLabel: role.role,
+        onSpawn: input.onChild,
       }),
     );
     if (turn.sessionId) {
@@ -186,9 +190,12 @@ export const runRoleSession: SessionRunner = async (input) => {
     const actions = parseReplyActions(turn.resultText);
     return { ok: !turn.isError, actions, resultText: turn.resultText, costUsd: turn.totalCostUsd, error: turn.isError ? turn.resultText.slice(0, 200) : undefined };
   } catch (err) {
-    if (err instanceof TurnTimeoutError && err.sessionId) {
+    // A killed session (watchdog, ceiling, the owner's "прервать") is still resumable and
+    // still cost something: its id and the usage-based estimate are kept.
+    const killed = err instanceof TurnTimeoutError || err instanceof TurnKilledError ? err : undefined;
+    if (killed?.sessionId) {
       writeThreadState(stateDir, role.role, batch.thread, {
-        sessionId: err.sessionId,
+        sessionId: killed.sessionId,
         cwd,
         model: role.model,
         engine: "claude",
@@ -197,6 +204,6 @@ export const runRoleSession: SessionRunner = async (input) => {
     }
     // A resume that points at a session claude no longer has: forget it, next try is fresh.
     if (resumeId && /No conversation found/i.test(String((err as Error).message))) forgetThreadState(stateDir, role.role, batch.thread);
-    return { ok: false, actions: parseReplyActions(""), resultText: "", error: String((err as Error).message).slice(0, 200), costUsd: 0 };
+    return { ok: false, actions: parseReplyActions(""), resultText: "", error: String((err as Error).message).slice(0, 200), costUsd: killed?.costUsd ?? 0 };
   }
 };

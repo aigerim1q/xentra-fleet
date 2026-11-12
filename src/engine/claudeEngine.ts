@@ -3,6 +3,7 @@ import { createInterface } from "node:readline";
 import type { ClaudeTurnResult } from "../types.js";
 import { buildDisallowedTools, withAlwaysDisallowed } from "./guardrails.js";
 import { SECRET_ENV_VARS, config, secretValues } from "../config.js";
+import { killProcessGroup } from "./processGroup.js";
 import { scrubSecrets } from "./secretScrub.js";
 import { openSessionLog } from "./sessionLog.js";
 
@@ -35,22 +36,63 @@ interface RunClaudeTurnOptions {
   // Default to config.agentIdleTimeoutMs / agentTurnTimeoutMs; 0 disables.
   idleTimeoutMs?: number;
   turnTimeoutMs?: number;
-  // Role name for the session journal file (engine/sessionLog.ts), e.g. "dev", "pm".
+  // Role name for the session journal file (engine/sessionLog.ts), e.g. "dev", "pm";
+  // also the key under which the running child can be killed (killTurnsByLabel).
   logLabel?: string;
+  // Called with the child's pid once spawned (the fleet records it next to the role).
+  onSpawn?: (pid: number) => void;
 }
 
 // Thrown when the harness itself killed the turn: "idle" — the stream went silent for
 // idleTimeoutMs; "ceiling" — the turn ran past turnTimeoutMs. sessionId comes from the
-// stream's init event, so a caller can still --resume the killed session.
+// stream's init event, so a caller can still --resume the killed session. costUsd is
+// an estimate from the usage the stream reported before the kill (no result line ever
+// arrives), so a killed session is not booked as free.
 export class TurnTimeoutError extends Error {
   constructor(
     readonly kind: "idle" | "ceiling",
     readonly afterMs: number,
     readonly sessionId?: string,
+    readonly costUsd = 0,
   ) {
     super(`claude turn stopped by ${kind === "idle" ? "idle watchdog" : "turn ceiling"} after ${Math.round(afterMs / 60000)} min`);
     this.name = "TurnTimeoutError";
   }
+}
+
+// Thrown when something else killed the turn by signal: /kill in the bot, the owner's
+// "прервать" in the fleet, a shutdown. Same session id / cost estimate as above.
+export class TurnKilledError extends Error {
+  constructor(
+    readonly signal: string,
+    readonly sessionId?: string,
+    readonly costUsd = 0,
+  ) {
+    super(`claude killed by ${signal}`);
+    this.name = "TurnKilledError";
+  }
+}
+
+export interface UsageTotals {
+  input: number;
+  cacheRead: number;
+  cacheCreation: number;
+  output: number;
+}
+
+// $/M tokens by model family, in the order input / cache read / cache write / output.
+// A rough ledger figure for killed sessions, not billing: real cost comes from the
+// result line when a turn finishes.
+const PRICES: Array<[RegExp, [number, number, number, number]]> = [
+  [/opus/i, [15, 1.5, 18.75, 75]],
+  [/haiku/i, [1, 0.1, 1.25, 5]],
+  [/./, [3, 0.3, 3.75, 15]],
+];
+
+export function estimateCostUsd(u: UsageTotals, model = ""): number {
+  const [, p] = PRICES.find(([re]) => re.test(model)) ?? PRICES[PRICES.length - 1];
+  const usd = (u.input * p[0] + u.cacheRead * p[1] + u.cacheCreation * p[2] + u.output * p[3]) / 1_000_000;
+  return Math.round(usd * 10_000) / 10_000;
 }
 
 // SIGTERM first, SIGKILL if the process is still around after this — same grace the
@@ -65,15 +107,25 @@ export function messageContextTokens(usage: Record<string, unknown> | undefined)
   );
 }
 
-// Tracked outside the promise closure so /kill can reach across process
-// boundaries that don't share call stacks (Telegram command handler vs. the
-// in-flight turn). Only one turn ever runs at a time (the queue is sequential).
-let currentChild: ChildProcess | null = null;
+// Tracked outside the promise closure so /kill (bot) and the fleet's "прервать" can reach
+// turns across call stacks. The pipeline runs one turn at a time; the fleet runs one per
+// role, keyed by logLabel (the role name). Kills go to the whole process group.
+const active = new Map<ChildProcess, string>();
 
 export function killCurrentTurn(): boolean {
-  if (!currentChild) return false;
-  currentChild.kill("SIGTERM");
-  return true;
+  let any = false;
+  for (const child of active.keys()) any = killProcessGroup(child, "SIGTERM") || any;
+  return any;
+}
+
+export function killTurnsByLabel(label: string): boolean {
+  let any = false;
+  for (const [child, l] of active) if (l === label) any = killProcessGroup(child, "SIGTERM") || any;
+  return any;
+}
+
+export function activeTurnLabels(): string[] {
+  return [...active.values()];
 }
 
 function truncate(s: string, n: number): string {
@@ -139,12 +191,16 @@ export async function runClaudeTurn(opts: RunClaudeTurnOptions): Promise<ClaudeT
   let stderrText = "";
   let lastContextTokens = 0;
   let streamSessionId: string | undefined;
+  const totals: UsageTotals = { input: 0, cacheRead: 0, cacheCreation: 0, output: 0 };
   const idleMs = opts.idleTimeoutMs ?? config.agentIdleTimeoutMs;
   const ceilingMs = opts.turnTimeoutMs ?? config.agentTurnTimeoutMs;
 
   await new Promise<void>((resolve, reject) => {
-    const child = spawn("claude", args, { cwd: opts.cwd, env: buildAgentEnv() });
-    currentChild = child;
+    // Own process group: a kill (watchdog, /kill, shutdown) reaches every subprocess the
+    // agent started, not just the CLI — see engine/processGroup.ts.
+    const child = spawn("claude", args, { cwd: opts.cwd, env: buildAgentEnv(), detached: true });
+    active.set(child, opts.logLabel ?? "turn");
+    if (child.pid) opts.onSpawn?.(child.pid);
     const journal = openSessionLog(opts.logLabel ?? "turn", secretValues());
 
     let stoppedBy: { kind: "idle" | "ceiling"; afterMs: number } | undefined;
@@ -152,8 +208,8 @@ export async function runClaudeTurn(opts: RunClaudeTurnOptions): Promise<ClaudeT
     const stop = (kind: "idle" | "ceiling", afterMs: number) => {
       if (stoppedBy) return;
       stoppedBy = { kind, afterMs };
-      child.kill("SIGTERM");
-      killTimer = setTimeout(() => child.kill("SIGKILL"), KILL_GRACE_MS);
+      killProcessGroup(child, "SIGTERM");
+      killTimer = setTimeout(() => killProcessGroup(child, "SIGKILL"), KILL_GRACE_MS);
     };
     const ceilingTimer = ceilingMs > 0 ? setTimeout(() => stop("ceiling", ceilingMs), ceilingMs) : undefined;
     let idleTimer: NodeJS.Timeout | undefined;
@@ -182,8 +238,15 @@ export async function runClaudeTurn(opts: RunClaudeTurnOptions): Promise<ClaudeT
       }
       if (event.type === "system" && typeof event.session_id === "string") streamSessionId = event.session_id;
       if (event.type === "assistant") {
-        const used = messageContextTokens((event.message as Record<string, unknown>)?.usage as Record<string, unknown>);
+        const u = (event.message as Record<string, unknown>)?.usage as Record<string, unknown> | undefined;
+        const used = messageContextTokens(u);
         if (used > 0) lastContextTokens = used;
+        if (u) {
+          totals.input += Number(u.input_tokens ?? 0);
+          totals.cacheRead += Number(u.cache_read_input_tokens ?? 0);
+          totals.cacheCreation += Number(u.cache_creation_input_tokens ?? 0);
+          totals.output += Number(u.output_tokens ?? 0);
+        }
       }
       if (!opts.onLog) return;
 
@@ -201,6 +264,7 @@ export async function runClaudeTurn(opts: RunClaudeTurnOptions): Promise<ClaudeT
 
     child.stderr.on("data", (chunk) => (stderrText += chunk));
     child.on("error", (err) => {
+      active.delete(child);
       journal?.close();
       clearTimeout(ceilingTimer);
       clearTimeout(idleTimer);
@@ -208,17 +272,17 @@ export async function runClaudeTurn(opts: RunClaudeTurnOptions): Promise<ClaudeT
       reject(err);
     });
     child.on("close", (code, signal) => {
-      currentChild = null;
+      active.delete(child);
       journal?.close();
       clearTimeout(ceilingTimer);
       clearTimeout(idleTimer);
       clearTimeout(killTimer);
       if (stoppedBy) {
-        reject(new TurnTimeoutError(stoppedBy.kind, stoppedBy.afterMs, streamSessionId));
+        reject(new TurnTimeoutError(stoppedBy.kind, stoppedBy.afterMs, streamSessionId, estimateCostUsd(totals, opts.model)));
         return;
       }
       if (signal) {
-        reject(new Error(`claude killed by ${signal}`));
+        reject(new TurnKilledError(signal, streamSessionId, estimateCostUsd(totals, opts.model)));
         return;
       }
       if (code !== 0 && !resultLine) {

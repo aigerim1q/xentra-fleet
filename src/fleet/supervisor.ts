@@ -14,6 +14,9 @@ import { WATCHER_ADDRESSES, addCiWatch } from "./watchers.js";
 import { loadVerdicts, recordVerdict } from "./mergeBot.js";
 import { describeShaState, loadGateRun, saveGateRun } from "./gateState.js";
 import { HEARTBEAT_FILE } from "./names.js";
+import { cleanStaleRunning, takeKillRequest } from "./lock.js";
+import { killTurnsByLabel } from "../engine/claudeEngine.js";
+import { killCodexByLabel } from "../engine/codexReview.js";
 import { appendFileSync } from "node:fs";
 import type { RepoTarget } from "./workspace.js";
 
@@ -74,7 +77,12 @@ export interface SupervisorOptions {
   threadContext?: (thread: string, role: Role) => string | undefined;
   // Retry pause per letter after a failed session (tests shorten it).
   backoff?: { baseMs: number; maxMs: number };
+  // Kills the role's running agent process (default: by label in the engine registries).
+  killSession?: (role: Role) => boolean;
 }
+
+// How long Ctrl+C waits for running sessions before killing them.
+export const DEFAULT_SHUTDOWN_GRACE_MS = Number(process.env.FLEET_SHUTDOWN_GRACE_MS ?? 60_000);
 
 export class Supervisor {
   private busyRoles = new Set<string>();
@@ -83,6 +91,8 @@ export class Supervisor {
   private running = new Set<Promise<void>>();
   // letter id -> earliest time (ms) it may be picked up again
   private deferred = new Map<string, number>();
+  // roles whose current session was killed on the owner's request (consumed by run())
+  private interrupted = new Set<string>();
   private timer?: NodeJS.Timeout;
   private watchers: FSWatcher[] = [];
   private stopped = false;
@@ -121,12 +131,15 @@ export class Supervisor {
   }
 
   start(): void {
+    // A previous supervisor's leftovers: stale "работает" markers, orphaned agent processes.
+    mkdirSync(this.o.stateDir, { recursive: true });
+    cleanStaleRunning(this.o.stateDir, (l) => this.log(l));
     const kick = () => {
       if (!this.stopped) this.tick();
     };
-    for (const addr of [...this.o.roles.map((r) => r.mail), ...poolAddresses(this.o.roles).keys()]) {
+    for (const dir of [...[...this.o.roles.map((r) => r.mail), ...poolAddresses(this.o.roles).keys()].map((a) => this.o.spool.dir("Inbox", a)), this.o.stateDir]) {
       try {
-        this.watchers.push(watch(this.o.spool.dir("Inbox", addr), kick));
+        this.watchers.push(watch(dir, kick));
       } catch {
         /* polling still covers it */
       }
@@ -135,12 +148,42 @@ export class Supervisor {
     kick();
   }
 
-  async stop(): Promise<void> {
+  // Waits for running sessions up to graceMs, then kills what is still running (their
+  // edits are committed as WIP by run()) and waits for those to wind down.
+  async stop(opts: { graceMs?: number } = {}): Promise<void> {
     this.stopped = true;
     clearInterval(this.timer);
     rmSync(join(this.o.stateDir, HEARTBEAT_FILE), { force: true });
     for (const w of this.watchers) w.close();
-    await Promise.all(this.running);
+    const graceMs = opts.graceMs ?? DEFAULT_SHUTDOWN_GRACE_MS;
+    const all = () => Promise.all([...this.running]).then(() => true);
+    const timeout = (ms: number) => new Promise<boolean>((r) => setTimeout(() => r(false), ms));
+    if (this.running.size === 0 || (await Promise.race([all(), timeout(graceMs)]))) return;
+    this.log(`shutdown: ${this.running.size} session(s) still running after ${Math.round(graceMs / 1000)}s — killing`);
+    this.killAll();
+    await Promise.race([all(), timeout(graceMs)]);
+  }
+
+  // Kills every running session (shutdown). Each is handled by run() as interrupted.
+  killAll(): void {
+    for (const role of this.o.roles) if (this.busyRoles.has(role.role)) this.kill(role);
+  }
+
+  private kill(role: Role): boolean {
+    this.interrupted.add(role.role);
+    const killer = this.o.killSession ?? ((r: Role) => killTurnsByLabel(r.role) || killCodexByLabel(r.role));
+    const killed = killer(role);
+    this.log(`${role.role}: session kill requested${killed ? "" : " (no agent process found)"}`);
+    return killed;
+  }
+
+  // The owner asked (Telegram / console) to interrupt a role's current session: state/kill.<role>.
+  private serveKillRequests(): void {
+    for (const role of this.o.roles) {
+      if (!takeKillRequest(this.o.stateDir, role.role)) continue;
+      if (this.busyRoles.has(role.role)) this.kill(role);
+      else this.log(`${role.role}: interrupt requested, but nothing is running — ignored`);
+    }
   }
 
   // Heartbeat for the bot ("команда запущена"), refreshed every loop; only a running
@@ -185,6 +228,7 @@ export class Supervisor {
   tick(): Promise<void>[] {
     const started: Promise<void>[] = [];
     this.beat();
+    this.serveKillRequests();
     this.routePools();
     for (const role of this.o.roles) {
       if (this.busyRoles.has(role.role)) continue;
@@ -324,7 +368,17 @@ export class Supervisor {
     const history = threadLetters(spool, batch.thread).filter((l) => !l.kind && !letters.some((x) => x.id === l.id));
     const runningFile = join(this.o.stateDir, `running.${role.role}`);
     mkdirSync(this.o.stateDir, { recursive: true });
-    writeFileSync(runningFile, JSON.stringify({ thread: batch.thread, primary: batch.primary.id, startedAt: new Date().toISOString() }));
+    const runningInfo = { thread: batch.thread, primary: batch.primary.id, startedAt: new Date().toISOString(), pid: undefined as number | undefined };
+    writeFileSync(runningFile, JSON.stringify(runningInfo));
+    // The agent's pid next to the role: a later supervisor can kill an orphan after a crash.
+    const onChild = (pid: number) => {
+      runningInfo.pid = pid;
+      try {
+        writeFileSync(runningFile, JSON.stringify(runningInfo));
+      } catch {
+        /* best-effort */
+      }
+    };
     const keys = [...new Set(letters.map((l) => l.key).filter((k): k is string => !!k))];
     const extra = this.o.threadContext?.(batch.thread, role);
     const memory = [memoryPromptBlock(this.o.stateDir, batch.thread, keys), extra].filter(Boolean).join("\n\n");
@@ -340,7 +394,7 @@ export class Supervisor {
     let outcome;
     const t0 = Date.now();
     try {
-      outcome = await this.o.runSession({ role, batch, cwd, stateDir: this.o.stateDir, history, memory, changes });
+      outcome = await this.o.runSession({ role, batch, cwd, stateDir: this.o.stateDir, history, memory, changes, onChild });
     } finally {
       rmSync(runningFile, { force: true });
     }
@@ -369,6 +423,11 @@ export class Supervisor {
     if (!outcome.ok && isLimitError(outcome.error)) {
       for (const l of letters) this.autoAck(role, l, "сессия не стартовала: лимит движка");
       this.pauseForLimit(role, batch, outcome.error ?? "");
+      return;
+    }
+
+    if (this.interrupted.delete(role.role)) {
+      await this.finishInterrupted(role, batch, cwd);
       return;
     }
 
@@ -552,6 +611,27 @@ export class Supervisor {
     for (const l of letters) this.autoAck(role, l, `сессия завершена ${outcome.ok ? "ok" : "с ошибкой"}`);
 
     this.guardThread(batch.thread);
+  }
+
+  // The owner (or shutdown) killed the session mid-way: unfinished edits are saved as a
+  // WIP checkpoint, as on a timeout in the pipeline; the letters go back to their senders
+  // as not done (the owner interrupted on purpose — a retry is not what they asked for).
+  private async finishInterrupted(role: Role, batch: Batch, cwd: string): Promise<void> {
+    const letters = [batch.primary, ...batch.extras];
+    if (role.access === "edit") {
+      try {
+        const committed = await this.o.workspace.commit(cwd, `wip: checkpoint (session of ${role.role} interrupted by the owner)\n\nThread ${batch.thread}.`);
+        if (committed) this.log(`${role.role}: WIP checkpoint committed in ${cwd}`);
+      } catch (err) {
+        this.log(`${role.role}: WIP checkpoint failed: ${(err as Error).message}`);
+      }
+    }
+    for (const l of letters) {
+      this.notifyOnce(l, `${NOT_DONE} ${l.subject}`, `Сессию роли ${role.mail} прервал владелец. Незаконченные правки сохранены WIP-коммитом в ветке треда.`);
+      archive(this.o.spool, role.mail, l.id);
+      this.clearAttempts(role, l.id);
+      this.autoAck(role, l, "сессия прервана владельцем");
+    }
   }
 
   private guardThread(thread: string): void {

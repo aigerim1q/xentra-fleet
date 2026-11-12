@@ -323,3 +323,101 @@ test("a commit that fails (hook) is reported to the role as uncommitted edits, n
   const problem = sent.find((l) => l.subject === "Не всё из ответа выполнено")!;
   assert.match(problem.body, /правки не закоммичены \(git commit failed: hook says no\)/);
 });
+
+test("the owner interrupts a running session: it is killed, edits are saved as a WIP checkpoint, the letter goes back as not done", async () => {
+  const { requestKill } = await import("./lock.js");
+  const calls: string[] = [];
+  let abort: ((err: Error) => void) | undefined;
+  const sup = new Supervisor({
+    spool,
+    roles: [role("dev-1", "edit")],
+    repos,
+    stateDir,
+    backoff: BACKOFF,
+    pollMs: 20,
+    workspace: {
+      ...ws(),
+      commit: async (_d, message) => {
+        calls.push(`commit ${message.split("\n")[0]}`);
+        return true;
+      },
+    },
+    killSession: () => {
+      abort?.(new Error("claude killed by SIGTERM"));
+      return true;
+    },
+    runSession: async () => {
+      try {
+        await new Promise<void>((_r, reject) => (abort = reject));
+      } catch (err) {
+        return { ok: false, actions: parseReplyActions(""), resultText: "", error: (err as Error).message, costUsd: 0.12 };
+      }
+      throw new Error("unreachable");
+    },
+  });
+  const l = send(spool, { from: OWNER_ADDRESS, to: ["xentra/dev-1"], subject: "долгая задача", body: "" });
+  sup.start();
+  try {
+    await new Promise((r) => setTimeout(r, 60));
+    assert.ok(existsSync(join(stateDir, "running.dev-1")), "a session is running");
+    requestKill(stateDir, "dev-1");
+    await new Promise((r) => setTimeout(r, 150));
+  } finally {
+    await sup.stop({ graceMs: 500 });
+  }
+  assert.ok(calls.some((c) => /^commit wip: checkpoint/.test(c)), `WIP checkpoint expected, got ${JSON.stringify(calls)}`);
+  assert.equal(readInbox(spool, "xentra/dev-1").length, 0, "the letter is not retried");
+  const back = readInbox(spool, OWNER_ADDRESS);
+  assert.equal(back.length, 1);
+  assert.match(back[0].subject, /^Не выполнено: долгая задача/);
+  assert.match(back[0].body, /прервал владелец/);
+  assert.equal(back[0].thread, l.thread);
+  assert.ok(!existsSync(join(stateDir, "running.dev-1")));
+});
+
+test("stop() waits for sessions only up to the grace period, then kills them", async () => {
+  let abort: ((err: Error) => void) | undefined;
+  let killed = 0;
+  const sup = new Supervisor({
+    spool,
+    roles: [role("pm")],
+    repos,
+    stateDir,
+    backoff: BACKOFF,
+    pollMs: 20,
+    workspace: ws(),
+    killSession: () => {
+      killed++;
+      abort?.(new Error("claude killed by SIGTERM"));
+      return true;
+    },
+    runSession: async () => {
+      try {
+        await new Promise<void>((_r, reject) => (abort = reject));
+      } catch (err) {
+        return { ok: false, actions: parseReplyActions(""), resultText: "", error: (err as Error).message, costUsd: 0 };
+      }
+      throw new Error("unreachable");
+    },
+  });
+  send(spool, { from: OWNER_ADDRESS, to: ["xentra/pm"], subject: "x", body: "" });
+  sup.start();
+  await new Promise((r) => setTimeout(r, 60));
+  const t0 = Date.now();
+  await sup.stop({ graceMs: 100 });
+  assert.ok(Date.now() - t0 < 2000, "stop must not wait for the 5-hour session");
+  assert.equal(killed, 1);
+});
+
+test("start() removes stale running markers left by a crashed supervisor", async () => {
+  const { mkdirSync, writeFileSync } = await import("node:fs");
+  mkdirSync(stateDir, { recursive: true });
+  writeFileSync(join(stateDir, "running.pm"), JSON.stringify({ thread: "old", startedAt: "x" }));
+  const { sup } = supervisor([role("pm")], (i) => `<ack id="${i.batch.primary.id}"/>`);
+  sup.start();
+  try {
+    assert.ok(!existsSync(join(stateDir, "running.pm")));
+  } finally {
+    await sup.stop({ graceMs: 100 });
+  }
+});

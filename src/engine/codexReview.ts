@@ -3,6 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildAgentEnv } from "./claudeEngine.js";
+import { killProcessGroup } from "./processGroup.js";
 import { buildReviewBrief, producedVerdict } from "./review.js";
 import { scrubSecrets } from "./secretScrub.js";
 import { secretValues } from "../config.js";
@@ -113,39 +114,51 @@ export function mergeReviewOutcomes(a: ReviewOutcome, b: ReviewOutcome): ReviewO
   };
 }
 
-let currentCodex: ChildProcess | null = null;
+// Running codex processes by label ("reviewer" in the pipeline, the role name in the
+// fleet), killed with their process group like claude turns.
+const active = new Map<ChildProcess, string>();
 
 export function killCodexReview(): boolean {
-  if (!currentCodex) return false;
-  currentCodex.kill("SIGTERM");
-  return true;
+  let any = false;
+  for (const child of active.keys()) any = killProcessGroup(child, "SIGTERM") || any;
+  return any;
 }
 
-function runCodex(args: string[], prompt: string, timeoutMs: number): Promise<{ code: number | null; stderr: string; timedOut: boolean }> {
+export function killCodexByLabel(label: string): boolean {
+  let any = false;
+  for (const [child, l] of active) if (l === label) any = killProcessGroup(child, "SIGTERM") || any;
+  return any;
+}
+
+function runCodex(args: string[], prompt: string, timeoutMs: number, label: string, onSpawn?: (pid: number) => void): Promise<{ code: number | null; stderr: string; timedOut: boolean; signal: string | null }> {
   return new Promise((resolve) => {
     // buildAgentEnv strips the harness's Jira/GitLab/Telegram tokens; Codex keeps its
     // own ChatGPT login from ~/.codex, which lives outside the env.
-    const child = spawn("codex", args, { env: buildAgentEnv(), stdio: ["pipe", "ignore", "pipe"] });
-    currentCodex = child;
+    const child = spawn("codex", args, { env: buildAgentEnv(), stdio: ["pipe", "ignore", "pipe"], detached: true });
+    active.set(child, label);
+    if (child.pid) onSpawn?.(child.pid);
     let stderr = "";
     let timedOut = false;
+    let killTimer: NodeJS.Timeout | undefined;
     const timer = setTimeout(() => {
       timedOut = true;
-      child.kill("SIGTERM");
+      killProcessGroup(child, "SIGTERM");
+      killTimer = setTimeout(() => killProcessGroup(child, "SIGKILL"), 60_000);
     }, timeoutMs);
     child.stderr.on("data", (chunk: Buffer) => {
       stderr = (stderr + chunk.toString()).slice(-4000);
     });
-    const finish = (code: number | null) => {
+    const finish = (code: number | null, signal: string | null = null) => {
       clearTimeout(timer);
-      if (currentCodex === child) currentCodex = null;
-      resolve({ code, stderr, timedOut });
+      clearTimeout(killTimer);
+      active.delete(child);
+      resolve({ code, stderr, timedOut, signal });
     };
     child.on("error", (err) => {
       stderr += String(err);
       finish(null);
     });
-    child.on("close", finish);
+    child.on("close", (code, signal) => finish(code, signal));
     child.stdin.end(prompt);
   });
 }
@@ -160,6 +173,8 @@ export async function runCodexExec(opts: {
   effort: string;
   timeoutMs: number;
   schema?: object;
+  label?: string;
+  onSpawn?: (pid: number) => void;
 }): Promise<{ text: string } | { error: string }> {
   const dir = mkdtempSync(join(tmpdir(), "codex-run-"));
   try {
@@ -170,9 +185,10 @@ export async function runCodexExec(opts: {
       writeFileSync(schemaPath, JSON.stringify(opts.schema));
     }
     const args = buildCodexArgs({ model: opts.model, effort: opts.effort, cwd: opts.cwd, schemaPath, outputPath });
-    const run = await runCodex(args, opts.prompt, opts.timeoutMs);
+    const run = await runCodex(args, opts.prompt, opts.timeoutMs, opts.label ?? "reviewer", opts.onSpawn);
     const why = (s: string) => ({ error: scrubSecrets(s, secretValues()).slice(0, 200) });
     if (run.timedOut) return why(`не уложился в ${Math.round(opts.timeoutMs / 60000)} мин`);
+    if (run.signal) return why(`codex killed by ${run.signal}`);
     if (run.code !== 0) return why(`код выхода ${run.code}: ${run.stderr.trim().split("\n").slice(-3).join(" ")}`);
     try {
       return { text: scrubSecrets(readFileSync(outputPath, "utf8"), secretValues()) };

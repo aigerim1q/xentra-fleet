@@ -1,10 +1,11 @@
-import { watch, type FSWatcher } from "node:fs";
+import { existsSync, watch, type FSWatcher } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { join } from "node:path";
 import { HARNESS_STATE_DIR, getLiveState } from "../../bot/liveState.js";
 import { config } from "../../config.js";
 import { loadState, costSince, startOfTodayIso } from "../../bot/state.js";
 import { FleetLimits } from "../../fleet/limits.js";
+import { requestKill } from "../../fleet/lock.js";
 import { releaseHold } from "../../fleet/loopGuard.js";
 import { Spool, archive, findInInbox, send } from "../../fleet/mail.js";
 import { checkReadiness } from "../../fleet/mergeBot.js";
@@ -216,6 +217,13 @@ export function handleConsole(req: IncomingMessage, res: ServerResponse, opts: {
         case "/api/console/release":
           releaseHold(ctx.spool, str(body.thread));
           break;
+        case "/api/console/kill": {
+          const role = str(body.role);
+          if (!ctx.roles.some((r) => r.role === role)) throw new Error("нет такой роли");
+          if (!existsSync(join(stateDir, `running.${role}`))) throw new Error("эта роль сейчас ничего не делает");
+          requestKill(stateDir, role, "console");
+          break;
+        }
         case "/api/console/read":
           archive(ctx.spool, OWNER_ADDRESS, str(body.letterId));
           break;

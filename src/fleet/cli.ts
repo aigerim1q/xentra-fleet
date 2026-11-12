@@ -5,7 +5,8 @@ import { listHolds, releaseHold } from "./loopGuard.js";
 import { Spool, archive, readInbox, send, thread, type Priority } from "./mail.js";
 import { OWNER_ADDRESS, loadRoles, poolAddresses } from "./roles.js";
 import { runRoleSession } from "./session.js";
-import { FLEET_ADDRESS, Supervisor } from "./supervisor.js";
+import { DEFAULT_SHUTDOWN_GRACE_MS, FLEET_ADDRESS, Supervisor } from "./supervisor.js";
+import { acquireSupervisorLock, cleanStaleRunning } from "./lock.js";
 import { FleetLimits } from "./limits.js";
 import { pollCi, pollJira, type WatcherDeps } from "./watchers.js";
 import { JiraClient } from "../jira/client.js";
@@ -112,14 +113,26 @@ export function registerFleetCommands(program: Command): void {
     .command("run")
     .description("Run the supervisor until stopped (Ctrl+C)")
     .action(async () => {
+      // One supervisor per spool: two would run two sessions in one worktree.
+      const release = acquireSupervisorLock(join(fleetHome(), "state"));
       const sup = await buildSupervisor((l) => console.log(l));
       sup.start();
       const stopWatchers = startWatchers((l) => console.log(l));
       console.log(`[fleet] supervisor started, spool ${new Spool().root}`);
+      let stopping = false;
       const shutdown = async () => {
-        console.log("[fleet] stopping — waiting for running sessions");
+        if (stopping) {
+          // Second Ctrl+C: don't wait for the grace period, kill now.
+          console.log("[fleet] killing running sessions");
+          sup.killAll();
+          setTimeout(() => process.exit(1), 5000).unref();
+          return;
+        }
+        stopping = true;
+        console.log(`[fleet] stopping — waiting up to ${Math.round(DEFAULT_SHUTDOWN_GRACE_MS / 1000)}s for running sessions (Ctrl+C again to kill now)`);
         stopWatchers();
-        await sup.stop();
+        await sup.stop({ graceMs: DEFAULT_SHUTDOWN_GRACE_MS });
+        release();
         process.exit(0);
       };
       process.on("SIGINT", shutdown);
@@ -130,8 +143,15 @@ export function registerFleetCommands(program: Command): void {
     .command("once")
     .description("Process every pending letter, then exit")
     .action(async () => {
-      const sup = await buildSupervisor((l) => console.log(l));
-      await sup.settle();
+      const stateDir = join(fleetHome(), "state");
+      const release = acquireSupervisorLock(stateDir);
+      try {
+        cleanStaleRunning(stateDir, (l) => console.log(`[fleet] ${l}`));
+        const sup = await buildSupervisor((l) => console.log(l));
+        await sup.settle();
+      } finally {
+        release();
+      }
     });
 
   const mail = fleet.command("mail").description("The owner's mailbox (xentra/owner) from the terminal");

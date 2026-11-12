@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { messageContextTokens, runClaudeTurn, TurnTimeoutError } from "./claudeEngine.js";
+import { activeTurnLabels, estimateCostUsd, killTurnsByLabel, messageContextTokens, runClaudeTurn, TurnKilledError, TurnTimeoutError } from "./claudeEngine.js";
 
 // A fake `claude` on PATH whose behaviour is picked by FAKE_CLAUDE_MODE.
 const SCRIPT = `#!/usr/bin/env node
@@ -11,6 +11,10 @@ const out = (o) => process.stdout.write(JSON.stringify(o) + "\\n");
 const mode = process.env.FAKE_CLAUDE_MODE;
 out({ type: "system", subtype: "init", session_id: "11111111-2222-3333-4444-555555555555" });
 if (mode === "silent") setInterval(() => {}, 1000);
+if (mode === "usage-then-silent") {
+  out({ type: "assistant", message: { content: [], usage: { input_tokens: 1000, cache_read_input_tokens: 50000, cache_creation_input_tokens: 2000, output_tokens: 500 } } });
+  setInterval(() => {}, 1000);
+}
 if (mode === "chatty") setInterval(() => out({ type: "user", message: { content: [] } }), 20);
 if (mode === "ok") {
   const u = (n) => ({ input_tokens: 10, cache_read_input_tokens: n, cache_creation_input_tokens: 5 });
@@ -89,4 +93,28 @@ test("inside a task scope the turn's stream is journaled to sessions/*.jsonl", a
   } finally {
     rmSync(state, { recursive: true, force: true });
   }
+});
+
+test("a killed turn carries a usage-based cost estimate instead of $0", async () => {
+  process.env.FAKE_CLAUDE_MODE = "usage-then-silent";
+  const err = await runClaudeTurn({ ...base, model: "claude-sonnet-5-5", idleTimeoutMs: 1500, turnTimeoutMs: 20_000 }).catch((e) => e);
+  assert.ok(err instanceof TurnTimeoutError);
+  const expected = estimateCostUsd({ input: 1000, cacheRead: 50000, cacheCreation: 2000, output: 500 }, "claude-sonnet-5-5");
+  assert.ok(expected > 0);
+  assert.equal(err.costUsd, expected);
+  assert.ok(estimateCostUsd({ input: 1000, cacheRead: 50000, cacheCreation: 2000, output: 500 }, "claude-opus-5-5") > expected, "opus costs more");
+});
+
+test("a turn can be killed by its label (the fleet's «прервать»), ending as TurnKilledError with the session id", async () => {
+  process.env.FAKE_CLAUDE_MODE = "usage-then-silent";
+  const turn = runClaudeTurn({ ...base, logLabel: "dev-1", idleTimeoutMs: 30_000, turnTimeoutMs: 60_000 });
+  await new Promise((r) => setTimeout(r, 700));
+  assert.ok(activeTurnLabels().includes("dev-1"));
+  assert.equal(killTurnsByLabel("nobody"), false);
+  assert.equal(killTurnsByLabel("dev-1"), true);
+  const err = await turn.catch((e) => e);
+  assert.ok(err instanceof TurnKilledError, String(err));
+  assert.equal(err.sessionId, "11111111-2222-3333-4444-555555555555");
+  assert.ok(err.costUsd > 0);
+  assert.ok(!activeTurnLabels().includes("dev-1"));
 });
