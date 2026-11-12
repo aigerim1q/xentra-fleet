@@ -168,3 +168,27 @@ test("short supervisor notices (gate results) do not count toward the echo thres
   const echo = Array.from({ length: EARLY_LIMIT + 1 }, () => letter("xentra/pm", "ок"));
   assert.equal(shouldHold(echo, ["xentra/fleet"]), true);
 });
+
+test("a letter body keeps its inline code and code blocks (only blocks quoted OUTSIDE a letter are ignored)", () => {
+  const raw = [
+    "Here is how the protocol looks: `<push title=\"x\"/>` — not a command.",
+    '<mail to="xentra/dev" subject="Fix `MEET_LIVE_ENABLED` parsing">',
+    "Flags `MEET_LIVE_ENABLED` and `MEET_GUEST_ENABLED` live in `src/config/app.config.ts`.",
+    "```ts",
+    "const on = parseFlag(process.env.MEET_LIVE_ENABLED);",
+    "```",
+    "> quoted line inside the body",
+    "</mail>",
+    '<ack id="l-1" note="see `foo`"/>',
+    '<memory scope="task">use `parseFlag` helper</memory>',
+  ].join("\n");
+  const a = parseReplyActions(raw);
+  assert.equal(a.push, undefined);
+  assert.equal(a.mails.length, 1);
+  assert.equal(a.mails[0].subject, "Fix `MEET_LIVE_ENABLED` parsing");
+  assert.match(a.mails[0].body, /Flags `MEET_LIVE_ENABLED` and `MEET_GUEST_ENABLED` live in `src\/config\/app\.config\.ts`\./);
+  assert.match(a.mails[0].body, /```ts\nconst on = parseFlag\(process\.env\.MEET_LIVE_ENABLED\);\n```/);
+  assert.match(a.mails[0].body, /> quoted line inside the body/);
+  assert.deepEqual(a.acks, [{ id: "l-1", note: "see `foo`" }]);
+  assert.equal(a.memory[0].text, "use `parseFlag` helper");
+});

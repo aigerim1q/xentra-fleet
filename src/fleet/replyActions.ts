@@ -45,20 +45,38 @@ function attrs(text: string): Record<string, string> {
 }
 
 // Blocks are commands only in the role's own prose. Anything quoted — fenced code, inline
-// code, blockquote lines — is dropped first, so a role that cites a letter containing
-// `<push title=…/>` or explains the protocol with an example does not execute it.
+// code, blockquote lines — is masked first, so a role that cites a letter containing
+// `<push title=…/>` or explains the protocol with an example does not execute it. The
+// mask keeps every offset (quoted chars become spaces, newlines stay): blocks are FOUND
+// in the masked text but their attributes and bodies are READ from the original, so a
+// letter body keeps its code identifiers and code blocks.
+const QUOTED = [/```[\s\S]*?(```|$)/g, /~~~[\s\S]*?(~~~|$)/g, /`[^`\n]*`/g, /^[ \t]*>.*$/gm];
+
+export function maskQuoted(text: string): string {
+  let out = text;
+  for (const re of QUOTED) out = out.replace(re, (m) => m.replace(/[^\n]/g, " "));
+  return out;
+}
+
+// Kept for callers that want the role's prose only (quoted parts removed).
 export function stripQuoted(text: string): string {
-  return text
-    .replace(/```[\s\S]*?(```|$)/g, "")
-    .replace(/~~~[\s\S]*?(~~~|$)/g, "")
-    .replace(/`[^`\n]*`/g, "")
-    .replace(/^[ \t]*>.*$/gm, "");
+  let out = text;
+  for (const re of QUOTED) out = out.replace(re, "");
+  return out;
+}
+
+// Every match of `re` (needs the d flag) in the masked text, with its groups read from the raw text.
+function* blocks(raw: string, masked: string, re: RegExp): Generator<string[]> {
+  for (const m of masked.matchAll(re)) {
+    const idx = (m as RegExpMatchArray & { indices: Array<[number, number] | undefined> }).indices;
+    yield idx.map((r) => (r ? raw.slice(r[0], r[1]) : ""));
+  }
 }
 
 export function parseReplyActions(raw: string): ReplyActions {
-  const text = stripQuoted(raw);
+  const text = maskQuoted(raw);
   const mails: MailAction[] = [];
-  for (const m of text.matchAll(/<mail\b([^>]*)>([\s\S]*?)<\/mail>/gi)) {
+  for (const m of blocks(raw, text, /<mail\b([^>]*)>([\s\S]*?)<\/mail>/dgi)) {
     const a = attrs(m[1]);
     const to = (a.to ?? "")
       .split(",")
@@ -76,18 +94,18 @@ export function parseReplyActions(raw: string): ReplyActions {
     });
   }
   const acks: Array<{ id: string; note?: string }> = [];
-  for (const m of text.matchAll(/<ack\b([^>]*?)\/?>/gi)) {
+  for (const m of blocks(raw, text, /<ack\b([^>]*?)\/?>/dgi)) {
     const a = attrs(m[1]);
     if (a.id) acks.push({ id: a.id, note: a.note || undefined });
   }
   const memory: MemoryAction[] = [];
-  for (const m of text.matchAll(/<memory\b([^>]*)>([\s\S]*?)<\/memory>/gi)) {
+  for (const m of blocks(raw, text, /<memory\b([^>]*)>([\s\S]*?)<\/memory>/dgi)) {
     const a = attrs(m[1]);
     const body = m[2].trim();
     if (!body) continue;
     memory.push({ scope: a.scope === "task" ? "task" : "thread", key: a.key || undefined, text: body });
   }
-  const pushTag = /<push\b([^>]*?)\/?>/i.exec(text);
+  const pushTag = blocks(raw, text, /<push\b([^>]*?)\/?>/dgi).next().value;
   const pushTitle = pushTag ? attrs(pushTag[1]).title : undefined;
   return { mails, acks, gates: /<gates\s*\/?>/i.test(text), memory, watchCi: /<watch-ci\s*\/?>/i.test(text), ...(pushTitle ? { push: { title: pushTitle } } : {}) };
 }
