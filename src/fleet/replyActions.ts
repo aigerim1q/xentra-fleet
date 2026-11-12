@@ -44,7 +44,19 @@ function attrs(text: string): Record<string, string> {
   return out;
 }
 
-export function parseReplyActions(text: string): ReplyActions {
+// Blocks are commands only in the role's own prose. Anything quoted — fenced code, inline
+// code, blockquote lines — is dropped first, so a role that cites a letter containing
+// `<push title=…/>` or explains the protocol with an example does not execute it.
+export function stripQuoted(text: string): string {
+  return text
+    .replace(/```[\s\S]*?(```|$)/g, "")
+    .replace(/~~~[\s\S]*?(~~~|$)/g, "")
+    .replace(/`[^`\n]*`/g, "")
+    .replace(/^[ \t]*>.*$/gm, "");
+}
+
+export function parseReplyActions(raw: string): ReplyActions {
+  const text = stripQuoted(raw);
   const mails: MailAction[] = [];
   for (const m of text.matchAll(/<mail\b([^>]*)>([\s\S]*?)<\/mail>/gi)) {
     const a = attrs(m[1]);

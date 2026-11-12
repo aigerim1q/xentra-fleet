@@ -491,6 +491,10 @@ export class Supervisor {
       }
     }
 
+    // New work arrived (a letter from the owner or another role, not a gate result or a
+    // problem notice from the supervisor): the thread's gate budget starts over.
+    const roleMails = new Set(this.o.roles.map((r) => r.mail));
+    if (letters.some((l) => l.from === OWNER_ADDRESS || (roleMails.has(l.from) && l.from !== role.mail))) this.resetCounter(`gates.${batch.thread}`);
     if (outcome.actions.gates && this.bumpCounter(`gates.${batch.thread}`) > MAX_GATE_RUNS) {
       problems.push(`гейты в этом треде уже запускались ${MAX_GATE_RUNS} раз — больше не запускаю; напиши pm или владельцу, что мешает`);
     } else if (outcome.actions.gates) {
@@ -639,7 +643,7 @@ export class Supervisor {
     // The supervisor's own letters count too: a role that repeats the same mistake gets a
     // problem letter each time, which wakes it again — a role<->supervisor loop.
     const letters = recentRoleLetters(spool, [...this.o.roles.map((r) => r.mail), FLEET_ADDRESS], thread);
-    if (!shouldHold(letters)) return;
+    if (!shouldHold(letters, [FLEET_ADDRESS])) return;
     if (!placeHold(spool, thread)) return;
     this.log(`thread ${thread} put on hold: ${letters.length} role letters in 30 min`);
     send(spool, {
@@ -682,6 +686,10 @@ export class Supervisor {
     mkdirSync(dir, { recursive: true });
     writeFileSync(p, String(n));
     return n;
+  }
+
+  private resetCounter(name: string): void {
+    rmSync(join(this.o.stateDir, "counters", name.replace(/[^A-Za-z0-9_.-]/g, "_")), { force: true });
   }
 
   private attemptsPath(role: Role, id: string): string {

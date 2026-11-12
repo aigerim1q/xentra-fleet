@@ -421,3 +421,20 @@ test("start() removes stale running markers left by a crashed supervisor", async
     await sup.stop({ graceMs: 100 });
   }
 });
+
+test("the per-thread gate budget starts over when new work arrives from the owner or another role", async () => {
+  const calls: string[] = [];
+  const { sup } = supervisor(
+    [role("dev-1", "edit")],
+    // gates on the owner's letters and on gate results; a "not done" problem notice is just acked
+    (i) => (i.batch.primary.subject.startsWith("Не всё") ? `<ack id="${i.batch.primary.id}"/>` : `<gates/><ack id="${i.batch.primary.id}"/>`),
+    calls,
+  );
+  const l = send(spool, { from: OWNER_ADDRESS, to: ["xentra/dev-1"], subject: "x", body: "" });
+  await drain(sup);
+  const first = calls.filter((c) => c === "gates").length;
+  assert.equal(first, MAX_GATE_RUNS, "capped once the budget is spent");
+  send(spool, { from: OWNER_ADDRESS, to: ["xentra/dev-1"], subject: "ещё правка", body: "", thread: l.thread });
+  await drain(sup);
+  assert.ok(calls.filter((c) => c === "gates").length > first, "a new owner letter re-opens the budget");
+});

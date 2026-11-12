@@ -71,9 +71,14 @@ export function recentRoleLetters(spool: Spool, roleAddresses: string[], thread:
   return out;
 }
 
-export function shouldHold(letters: Letter[]): boolean {
+// systemSenders (the supervisor's own address): their letters count toward the hard
+// limit — a role<->supervisor loop is still a loop — but not toward the "short letters"
+// echo check: "Гейты: зелёные" and status notices are short by nature, and counting them
+// would stop a healthy thread where a developer runs gates a few times.
+export function shouldHold(letters: Letter[], systemSenders: string[] = []): boolean {
   if (letters.length > HOLD_LIMIT) return true;
-  return letters.length > EARLY_LIMIT && looksLikeEcho(letters.map((l) => l.body));
+  const roleLetters = letters.filter((l) => !systemSenders.includes(l.from));
+  return roleLetters.length > EARLY_LIMIT && looksLikeEcho(roleLetters.map((l) => l.body));
 }
 
 // Returns true only for the caller that actually created the flag (O_EXCL), so exactly

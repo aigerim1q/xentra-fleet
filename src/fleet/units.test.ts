@@ -135,3 +135,36 @@ test("recentRoleLetters counts role letters of the thread, not acks or other thr
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("action blocks inside code fences, inline code or quoted lines are not executed", async () => {
+  const { parseReplyActions, stripQuoted } = await import("./replyActions.js");
+  const text = [
+    "Напоминаю протокол — пример:",
+    "```",
+    '<mail to="xentra/owner" subject="пример">не отправлять</mail>',
+    "<gates/>",
+    "```",
+    'В письме было `<push title="XEN-1"/>` — это цитата.',
+    '> <watch-ci/>',
+    '<ack id="1-x" note="ок"/>',
+    '<mail to="xentra/pm" subject="Настоящее">отправить</mail>',
+  ].join("\n");
+  const a = parseReplyActions(text);
+  assert.deepEqual(a.mails.map((m) => m.subject), ["Настоящее"]);
+  assert.equal(a.gates, false);
+  assert.equal(a.push, undefined);
+  assert.equal(a.watchCi, false);
+  assert.deepEqual(a.acks, [{ id: "1-x", note: "ок" }]);
+  assert.doesNotMatch(stripQuoted("a `x` b\n> q\nc"), /x|q/);
+});
+
+test("short supervisor notices (gate results) do not count toward the echo threshold; short role letters do", async () => {
+  const { shouldHold, EARLY_LIMIT } = await import("./loopGuard.js");
+  const letter = (from: string, body: string) => ({ id: "1", from, to: ["x"], subject: "s", priority: "normal" as const, date: "d", thread: "t", body });
+  const fleet = Array.from({ length: EARLY_LIMIT }, () => letter("xentra/fleet", "- test: ✅"));
+  const roles = Array.from({ length: 3 }, () => letter("xentra/dev-1", "<gates/>"));
+  assert.equal(shouldHold([...fleet, ...roles], ["xentra/fleet"]), false, "a healthy gates loop is not an echo");
+  assert.equal(shouldHold([...fleet, ...roles]), true, "without the exemption it would have been");
+  const echo = Array.from({ length: EARLY_LIMIT + 1 }, () => letter("xentra/pm", "ок"));
+  assert.equal(shouldHold(echo, ["xentra/fleet"]), true);
+});

@@ -43,7 +43,7 @@ CTO: ставит цели и принимает решения; ты помог
 ## Команды (Bash разрешён для них)
 - \`${cli} fleet status\` — кто работает, очереди, решения, треды за неделю, письма владельцу. **Начинай с неё.**
 - \`${cli} fleet mail thread <тред>\` — вся переписка по задаче.
-- \`${cli} fleet mail check\` / \`read <id> --keep\` — письма владельцу.
+- \`${cli} fleet mail check\` / \`read --keep <id>\` — письма владельцу.
 - \`${cli} fleet mail send --to xentra/pm --subject "XEN-55: …" --body "…" --key XEN-55\` — задача
   или ответ от имени владельца (новый тред; ответ в тред — \`--thread <тред>\`).
   **Отправляй только когда владелец явно попросил**, и покажи текст письма перед отправкой.
@@ -71,7 +71,8 @@ export function ctoSettings(cli: string, statusLine: string): object {
         `Bash(${cli} fleet status:*)`,
         `Bash(${cli} fleet mail check)`,
         `Bash(${cli} fleet mail thread:*)`,
-        `Bash(${cli} fleet mail read:*)`,
+        // `mail read` without --keep archives the owner's letter: only the keeping form is free.
+        `Bash(${cli} fleet mail read --keep:*)`,
         `Bash(${cli} fleet metrics:*)`,
         `Bash(${cli} fleet roles)`,
         `Bash(${cli} fleet hold list)`,

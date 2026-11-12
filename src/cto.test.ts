@@ -21,6 +21,9 @@ test("settings allow only read-style fleet commands without asking; sending mail
   const s = ctoSettings("node /x/dist/cli.js", "node /x/dist/cli.js cto-statusline") as { permissions: { allow: string[] } };
   assert.ok(s.permissions.allow.includes("Bash(node /x/dist/cli.js fleet status)"));
   assert.ok(!s.permissions.allow.some((r) => r.includes("mail send")));
+  assert.ok(s.permissions.allow.includes("Bash(node /x/dist/cli.js fleet mail read --keep:*)"));
+  assert.ok(!s.permissions.allow.some((r) => /mail read:\*/.test(r)), "reading without --keep archives the letter: must ask");
+  assert.match(ctoClaudeMd("node /x/dist/cli.js"), /read --keep <id>/);
 });
 
 test("status line shows model, context, cost and the team; never throws on junk", () => {
