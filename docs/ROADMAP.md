@@ -13,14 +13,14 @@
 смена статусов, лимиты. Безопасность: гейты без токенов, `--restricted`, пустой MCP, deny-list.
 
 Модели: PM Opus 5.5 · dev Sonnet 5.5 · ревью Opus 5.5 · тест/память Sonnet · заметки/отчёт/чат Haiku.
-Fable 5.1 недоступна на подписке («out of usage credits»). Второй ревьюер — Codex `gpt-6-astra`, effort `high`
-(`CODEX_REVIEW_MODEL`, `CODEX_REVIEW_EFFORT` в `.env`, ещё не подключён).
+Fable 5.1 недоступна на подписке («out of usage credits»), поэтому `REVIEW_MODEL` по умолчанию — Opus 5.5.
+Второй ревьюер — Codex `gpt-6-astra`, effort `high` (`CODEX_REVIEW_MODEL`, `CODEX_REVIEW_EFFORT` в `.env`).
 
 ## Соответствие: флот CTO → наш флот на Mac
 
 | У CTO (Linux) | У нас (Mac) |
 |---|---|
-| роли-личности в `~/develop/agents/<role>` | роли в `roles/<role>.yaml`: модель/провайдер, права, бакет, `accept_from` |
+| роли-личности в `~/develop/agents/<role>` | роли в `roles/<role>.json` + `roles/<role>.md`: модель/провайдер, права, тайм-аут, `acceptFrom` |
 | team-mail: файловый спул, ack без пробуждения, `not-before`, `supersedes` | `~/.xentra-fleet/mail/{Inbox,Sent,Archive,Acks}` — тот же формат (md + YAML-шапка) |
 | раннер на роль (systemd `agent@.service`, inotify) | один супервизор Node + воркер на роль (`fs.watch`); автозапуск — launchd plist |
 | сессия на письмо, `--resume` по треду (sid+cwd+model+provider) | то же: `state/<role>/thread.<id>.json` |

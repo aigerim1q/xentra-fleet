@@ -37,13 +37,12 @@ function buildGates(prefix: "BACKEND" | "FRONTEND", defaultTestCommand: string):
   return gates;
 }
 
-// Single source of truth for "env vars the spawned `claude` child process must never
-// see" (claudeEngine.ts strips exactly these before spawning). Every implement/review/
-// memory/testing-notes turn gets Bash by default — child_process.spawn otherwise
-// inherits the full parent env, so a prompt-injected ticket ("also run curl ... -d
-// \"$GITLAB_TOKEN\"") would succeed trivially with no file access needed. Kept here,
-// next to where each one is actually read, so a newly added secret can't silently miss
-// the denylist the way it would if the list lived somewhere unrelated.
+// The harness's own secrets, which no spawned `claude`/`codex` process, gate command or
+// commit hook may see (claudeEngine.ts's buildAgentEnv strips these by name, and on top
+// of them every variable whose name looks like a credential). Agents have no Bash, but
+// gates and hooks run code from the repository the agent edits — child_process.spawn
+// would otherwise hand them the full parent env. Kept here, next to where each one is
+// actually read, so a newly added secret can't silently miss the list.
 export const SECRET_ENV_VARS = ["JIRA_PAT", "GITLAB_TOKEN", "TELEGRAM_BOT_TOKEN"] as const;
 
 export const config = {
@@ -112,7 +111,7 @@ export const config = {
     // ETS Tender's own review intentionally doesn't share a model with its developer
     // role: a reviewer built the same way as the implementer is more likely to share
     // its blind spots, not just its strengths.
-    review: process.env.REVIEW_MODEL ?? "claude-fable-5-1",
+    review: process.env.REVIEW_MODEL ?? "claude-opus-5-5",
     // Writing a tester's walkthrough from a diff + task description is the same
     // bounded-judgment shape as propose/acceptance/memory, not an open-ended loop —
     // Sonnet, same tier as those.
@@ -181,6 +180,8 @@ export const config = {
   // possibly-stale local HEAD, so gates/acceptance tests run against what the MR will
   // actually be merged into, not whatever a human last happened to have checked out.
   freshBaseEnabled: (process.env.FRESH_BASE_ENABLED ?? "true") !== "false",
+  // Time limit of one gate command (GATE_TIMEOUT_MS, 30 min): on expiry the gate fails
+  // and its whole process group is killed — see engine/verify.ts.
   // Runs every `claude` turn with --restricted: no code-running tools, no WebFetch,
   // user/project/local settings ignored, file tools confined to the worktree (so the
   // node_modules symlink back into the main checkout can't be written through).
