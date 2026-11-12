@@ -24,7 +24,7 @@ import { createWorktree, commitAll, fetchFreshBase, rebaseOntoFreshBase } from "
 import { writeAcceptanceTest } from "./acceptanceTest.js";
 import { readMemoryFiles, buildMemoryContextBlock, updateProjectMemory } from "./memory.js";
 import { fingerprintFailure } from "./stuckDetector.js";
-import { reviewChanges, buildReviewFixPrompt, formatReviewRound } from "./review.js";
+import { reviewChanges, buildReviewFixPrompt, formatReviewRound, reviewGate } from "./review.js";
 import { mergeReviewOutcomes, reviewWithCodex } from "./codexReview.js";
 import { generateTestingNotes } from "./testingNotes.js";
 import { generateCloseReport } from "./closeReport.js";
@@ -177,7 +177,8 @@ async function runPostImplementSuccess(
             )
           : await reviewChanges(worktreeDir, task, claudeReview);
         totalCostUsd += reviewResult.costUsd;
-        reviewFindings = reviewResult.findings;
+        // No reviewer delivered a verdict → a blocking finding for a human (fail closed).
+        reviewFindings = reviewGate(reviewResult);
         if (reviewResult.reason) config.onLog?.(`⚠️ Не удалось провести ревью (${reviewResult.reason})`);
         writeTaskContext(task.id, "reviewer", `round-${round}.md`, formatReviewRound(reviewFindings, reviewResult.reason));
 

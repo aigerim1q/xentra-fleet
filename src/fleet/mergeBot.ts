@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { parseReviewResponse } from "../engine/review.js";
+import { parseReviewResponse, parseVerdictLine } from "../engine/review.js";
 import type { PipelineState } from "../gitlab.js";
 import { Spool, send } from "./mail.js";
 import { listPushes, type PushRequest } from "./pushRequests.js";
@@ -41,11 +41,14 @@ export function loadVerdicts(stateDir: string, thread: string): Record<string, V
   }
 }
 
-// An auditor's reply carries БЛОКИРУЮЩИЕ/ЗАМЕЧАНИЯ; the verdict is pinned to the commit
-// the auditor actually looked at. Returns undefined when the text has no verdict.
+// An auditor's reply must end with an explicit `ВЕРДИКТ: OK` / `ВЕРДИКТ: BLOCK` line; the
+// verdict is pinned to the commit the auditor actually looked at. No such line = no
+// verdict (the merge bot then never treats the MR as clean). A BLOCK line blocks even if
+// the list under БЛОКИРУЮЩИЕ didn't parse, and a parsed blocking item blocks despite OK.
 export function recordVerdict(stateDir: string, thread: string, role: string, sha: string, replyText: string, now = new Date()): Verdict | undefined {
-  if (!/блокирующие\s*:/i.test(replyText)) return undefined;
-  const blocking = parseReviewResponse(replyText).some((f) => f.blocking);
+  const line = parseVerdictLine(replyText);
+  if (!line) return undefined;
+  const blocking = line === "BLOCK" || parseReviewResponse(replyText).some((f) => f.blocking);
   const v: Verdict = { role, sha, blocking, at: now.toISOString() };
   const all = loadVerdicts(stateDir, thread);
   all[role] = v;

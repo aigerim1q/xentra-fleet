@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildAgentEnv } from "./claudeEngine.js";
-import { buildReviewBrief } from "./review.js";
+import { buildReviewBrief, producedVerdict } from "./review.js";
 import { scrubSecrets } from "./secretScrub.js";
 import { secretValues } from "../config.js";
 import { getWorktreeDiff } from "./git.js";
@@ -109,6 +109,7 @@ export function mergeReviewOutcomes(a: ReviewOutcome, b: ReviewOutcome): ReviewO
     findings: [...a.findings, ...b.findings],
     costUsd: a.costUsd + b.costUsd,
     reason: reasons.length > 0 ? reasons.join("; ") : undefined,
+    verdict: producedVerdict(a) || producedVerdict(b),
   };
 }
 
@@ -193,9 +194,9 @@ export async function reviewWithCodex(worktreeDir: string, task: TaskSpec, opts:
     timeoutMs: opts.timeoutMs,
     schema: CODEX_REVIEW_SCHEMA,
   });
-  if ("error" in run) return { findings: [], costUsd: 0, reason: `Codex: ${run.error}` };
+  if ("error" in run) return { findings: [], costUsd: 0, verdict: false, reason: `Codex: ${run.error}` };
   const findings = parseCodexReview(run.text);
-  if (!findings) return { findings: [], costUsd: 0, reason: "Codex: ответ не по схеме" };
+  if (!findings) return { findings: [], costUsd: 0, verdict: false, reason: "Codex: ответ не по схеме" };
   // Billed to the ChatGPT subscription, not per token — nothing to add to the task cost.
-  return { findings, costUsd: 0 };
+  return { findings, costUsd: 0, verdict: true };
 }

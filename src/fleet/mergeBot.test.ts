@@ -10,8 +10,8 @@ import { OWNER_ADDRESS, loadRoles, parseRole } from "./roles.js";
 import { Supervisor } from "./supervisor.js";
 import { parseReplyActions } from "./replyActions.js";
 
-const CLEAR = "БЛОКИРУЮЩИЕ:\nНЕТ\n\nЗАМЕЧАНИЯ:\n- a.ts:1 — мелочь";
-const BLOCK = "БЛОКИРУЮЩИЕ:\n- a.ts:2 — SQL-инъекция\n\nЗАМЕЧАНИЯ:\nНЕТ";
+const CLEAR = "БЛОКИРУЮЩИЕ:\n- НЕТ\n\nЗАМЕЧАНИЯ:\n- a.ts:1 — мелочь\n\nВЕРДИКТ: OK";
+const BLOCK = "БЛОКИРУЮЩИЕ:\n- a.ts:2 — SQL-инъекция\n\nЗАМЕЧАНИЯ:\nНЕТ\n\nВЕРДИКТ: BLOCK";
 const AUDITORS = ["auditor", "auditor-codex"];
 
 function setup() {
@@ -33,10 +33,13 @@ test("mode defaults to off; only notify/auto switch it on", () => {
   assert.equal(mergeModeFromEnv({ FLEET_MERGE_BOT: "notify" }), "notify");
 });
 
-test("recordVerdict keeps the latest verdict per auditor, pinned to a sha; no heading = no verdict", () => {
+test("recordVerdict keeps the latest verdict per auditor, pinned to a sha; no ВЕРДИКТ line = no verdict", () => {
   const s = setup();
   try {
     assert.equal(recordVerdict(s.stateDir, "t1", "auditor", "abc123", "Посмотрел, всё ок"), undefined);
+    assert.equal(recordVerdict(s.stateDir, "t1", "auditor", "abc123", "БЛОКИРУЮЩИЕ:\nНЕТ\n\nЗАМЕЧАНИЯ:\nНЕТ"), undefined, "headings alone are not a verdict");
+    assert.equal(recordVerdict(s.stateDir, "t1", "auditor", "abc123", "БЛОКИРУЮЩИЕ:\n1. a.ts:4 — гонка\n\nВЕРДИКТ: BLOCK")!.blocking, true, "numbered list blocks");
+    assert.equal(recordVerdict(s.stateDir, "t1", "auditor", "abc123", "БЛОКИРУЮЩИЕ:\nпроблема абзацем\n\nВЕРДИКТ: BLOCK")!.blocking, true, "BLOCK line blocks on its own");
     assert.equal(recordVerdict(s.stateDir, "t1", "auditor", "old", BLOCK)!.blocking, true);
     assert.equal(recordVerdict(s.stateDir, "t1", "auditor", "abc123", CLEAR)!.blocking, false);
     assert.deepEqual(Object.keys(loadVerdicts(s.stateDir, "t1")), ["auditor"]);

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildReviewPrompt, parseReviewResponse, buildReviewFixPrompt, formatReviewRound } from "./review.js";
+import { buildReviewPrompt, parseReviewResponse, buildReviewFixPrompt, formatReviewRound, interpretReview, parseVerdictLine, reviewGate } from "./review.js";
 import type { ReviewFinding, TaskSpec } from "../types.js";
 
 const task: TaskSpec = {
@@ -101,4 +101,33 @@ test("a cut diff tells the reviewer it is cut and how much is missing; a short o
   const long = buildReviewPrompt(task, "x".repeat(REVIEW_DIFF_CHARS + 500));
   assert.match(long, new RegExp(`Diff обрезан: показаны первые ${REVIEW_DIFF_CHARS} из ${REVIEW_DIFF_CHARS + 500} символов`));
   assert.doesNotMatch(buildReviewPrompt(task, "short diff"), /обрезан/);
+});
+
+test("a '- НЕТ' bullet is not a finding, and a numbered list under БЛОКИРУЮЩИЕ is", () => {
+  assert.deepEqual(parseReviewResponse("БЛОКИРУЮЩИЕ:\n- НЕТ\n\nЗАМЕЧАНИЯ:\n- нет."), []);
+  const numbered = parseReviewResponse("БЛОКИРУЮЩИЕ:\n1. a.ts:3 — гонка\n2) b.ts:9 — утечка\n\nЗАМЕЧАНИЯ:\nНЕТ");
+  assert.deepEqual(numbered.map((f) => [f.blocking, f.description]), [[true, "a.ts:3 — гонка"], [true, "b.ts:9 — утечка"]]);
+});
+
+test("the explicit verdict line is required; missing = no verdict (fail closed), BLOCK without a parsed list still blocks", () => {
+  assert.equal(parseVerdictLine("БЛОКИРУЮЩИЕ:\nНЕТ\nЗАМЕЧАНИЯ:\nНЕТ\nВЕРДИКТ: OK"), "OK");
+  assert.equal(parseVerdictLine("…\n**ВЕРДИКТ: BLOCK**"), "BLOCK");
+  assert.equal(parseVerdictLine("Формат: ВЕРДИКТ: OK|BLOCK\n…\nВЕРДИКТ: block"), "BLOCK");
+  assert.equal(parseVerdictLine("БЛОКИРУЮЩИЕ:\nНЕТ"), undefined);
+  assert.match(buildReviewPrompt(task, "d"), /ВЕРДИКТ: OK/);
+
+  const none = interpretReview("Всё хорошо, замечаний нет.");
+  assert.equal(none.verdict, false);
+  assert.match(none.reason!, /нет строки ВЕРДИКТ/);
+  assert.ok(reviewGate({ ...none, costUsd: 0 }).some((f) => f.blocking && /нужен человек/.test(f.description)));
+
+  const block = interpretReview("БЛОКИРУЮЩИЕ:\nесть гонка в a.ts, абзацем\n\nЗАМЕЧАНИЯ:\nНЕТ\n\nВЕРДИКТ: BLOCK");
+  assert.equal(block.verdict, true);
+  assert.ok(block.findings.some((f) => f.blocking));
+
+  const ok = interpretReview("БЛОКИРУЮЩИЕ:\n- НЕТ\n\nЗАМЕЧАНИЯ:\n- a.ts:1 — мелочь\n\nВЕРДИКТ: OK");
+  assert.equal(ok.verdict, true);
+  assert.deepEqual(reviewGate({ ...ok, costUsd: 0 }).filter((f) => f.blocking), []);
+
+  assert.ok(reviewGate({ findings: [], costUsd: 0, reason: "ход завершился ошибкой: timeout" }).some((f) => f.blocking), "an errored review is never 'no findings'");
 });

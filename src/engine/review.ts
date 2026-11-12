@@ -6,6 +6,20 @@ export interface ReviewOutcome {
   findings: ReviewFinding[];
   costUsd: number;
   reason?: string; // set when the turn itself errored — findings is then always []
+  // Whether the reviewer actually delivered a verdict (an explicit ВЕРДИКТ line, or a
+  // schema-checked Codex answer). Absent = derived from `reason` (older callers).
+  verdict?: boolean;
+}
+
+export function producedVerdict(o: ReviewOutcome): boolean {
+  return o.verdict ?? o.reason === undefined;
+}
+
+// Fail closed: a review that produced no verdict (turn error, format not followed) is a
+// blocking finding for a human, never "no findings".
+export function reviewGate(o: ReviewOutcome): ReviewFinding[] {
+  if (producedVerdict(o)) return o.findings;
+  return [...o.findings, { blocking: true, description: `Ревью не проведено: ${o.reason ?? "ревьюер не дал вердикта"} — нужен человек` }];
 }
 
 // Deliberately asked NOT to re-check what gates/tests already cover — a reviewer that
@@ -64,12 +78,26 @@ export function buildReviewPrompt(task: TaskSpec, diffText: string): string {
     "ЗАМЕЧАНИЯ:",
     "- <файл:строка — на что стоит обратить внимание, не блокирует>",
     "(если замечаний нет — напиши ровно НЕТ)",
+    "",
+    "ВЕРДИКТ: OK",
+    "(последняя строка — ровно `ВЕРДИКТ: OK` или `ВЕРДИКТ: BLOCK`; без неё ревью не засчитывается)",
   ].join("\n");
 }
 
 const BLOCKING_HEADING = /блокирующие\s*:?/i;
 const NONBLOCKING_HEADING = /замечания\s*:?/i;
-const BULLET_LINE = /^[-*•]\s+(.+)$/gm;
+// "- item", "* item", "1. item", "1) item" — a numbered list under БЛОКИРУЮЩИЕ is a list too.
+const BULLET_LINE = /^\s*(?:[-*•]|\d+[.)])\s+(.+)$/gm;
+const NONE_ITEM = /^(нет|no|none)\.?$/i;
+const VERDICT_LINE = /^\s*\**\s*ВЕРДИКТ\s*:\s*\**\s*(OK|BLOCK)\b/im;
+
+// The explicit verdict line, or undefined when the reviewer didn't give one. Taken from
+// the LAST such line: a reviewer quoting the format first and deciding later wins.
+export function parseVerdictLine(text: string): "OK" | "BLOCK" | undefined {
+  let last: string | undefined;
+  for (const m of text.matchAll(new RegExp(VERDICT_LINE.source, "gim"))) last = m[1].toUpperCase();
+  return last as "OK" | "BLOCK" | undefined;
+}
 
 export function parseReviewResponse(text: string): ReviewFinding[] {
   const blockIdx = text.search(BLOCKING_HEADING);
@@ -82,8 +110,9 @@ export function parseReviewResponse(text: string): ReviewFinding[] {
   const blockingSection = blockIdx !== -1 ? text.slice(blockIdx, blockingEnd) : "";
   const nonblockingSection = noteIdx !== -1 ? text.slice(noteIdx) : "";
 
-  const blocking = [...blockingSection.matchAll(BULLET_LINE)].map((m) => ({ blocking: true, description: m[1].trim() }));
-  const nonblocking = [...nonblockingSection.matchAll(BULLET_LINE)].map((m) => ({ blocking: false, description: m[1].trim() }));
+  const items = (section: string) => [...section.matchAll(BULLET_LINE)].map((m) => m[1].trim()).filter((d) => !NONE_ITEM.test(d));
+  const blocking = items(blockingSection).map((description) => ({ blocking: true, description }));
+  const nonblocking = items(nonblockingSection).map((description) => ({ blocking: false, description }));
   return [...blocking, ...nonblocking];
 }
 
@@ -143,8 +172,19 @@ export async function reviewChanges(
   });
 
   if (turn.isError) {
-    return { findings: [], costUsd: turn.totalCostUsd, reason: `ход завершился ошибкой: ${turn.resultText.slice(0, 200)}` };
+    return { findings: [], costUsd: turn.totalCostUsd, verdict: false, reason: `ход завершился ошибкой: ${turn.resultText.slice(0, 200)}` };
   }
+  return { ...interpretReview(turn.resultText), costUsd: turn.totalCostUsd };
+}
 
-  return { findings: parseReviewResponse(turn.resultText), costUsd: turn.totalCostUsd };
+// Findings plus the explicit verdict. No ВЕРДИКТ line = no verdict (fail closed); a
+// BLOCK line with nothing parsed under БЛОКИРУЮЩИЕ still blocks, with the text to read.
+export function interpretReview(text: string): { findings: ReviewFinding[]; verdict: boolean; reason?: string } {
+  const line = parseVerdictLine(text);
+  const findings = parseReviewResponse(text);
+  if (!line) return { findings, verdict: false, reason: "в ответе ревьюера нет строки ВЕРДИКТ: OK|BLOCK" };
+  if (line === "BLOCK" && !findings.some((f) => f.blocking)) {
+    findings.push({ blocking: true, description: `ревьюер поставил ВЕРДИКТ: BLOCK, но список блокирующих не разобран — прочитай его ответ: ${text.slice(0, 300)}` });
+  }
+  return { findings, verdict: true };
 }
