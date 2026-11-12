@@ -35,6 +35,11 @@ const ws = (calls: string[] = []): WorkspaceOps => ({
   headSha: async () => "sha1",
   changes: async () => ({ head: "sha1", stat: " src/a.ts | 2 +-\n 1 file changed", text: "diff --git a/src/a.ts b/src/a.ts\n+changed" }),
   integrity: async () => [],
+  remove: async (_dir, paths) => {
+    calls.push(`remove ${paths.join(",")}`);
+    const bad = paths.filter((x) => x.startsWith(".."));
+    return { removed: paths.filter((x) => !bad.includes(x)), rejected: bad.map((path) => ({ path, reason: "путь выходит за рабочую копию" })) };
+  },
 });
 
 const repos = { backend: { kind: "backend" as const, path: "/repo", baseBranch: "dev", gates: [] }, frontend: undefined };
@@ -452,4 +457,33 @@ test("the per-thread gate budget starts over when new work arrives from the owne
   send(spool, { from: OWNER_ADDRESS, to: ["xentra/dev-1"], subject: "ещё правка", body: "", thread: l.thread });
   await drain(sup);
   assert.ok(calls.filter((c) => c === "gates").length > first, "a new owner letter re-opens the budget");
+});
+
+test("<delete> of an edit role removes paths before the commit; a refused path is reported back", async () => {
+  const calls: string[] = [];
+  const { sup } = supervisor(
+    [role("dev-1", "edit")],
+    (i) => (i.batch.primary.from === OWNER_ADDRESS ? `<ack id="${i.batch.primary.id}"/>\n<delete path="src/old"/>\n<delete path="../etc"/>` : `<ack id="${i.batch.primary.id}"/>`),
+    calls,
+  );
+  const task = send(spool, { from: OWNER_ADDRESS, to: ["xentra/dev-1"], subject: "rename", body: "" });
+  await drain(sup);
+  const ri = calls.indexOf("remove src/old,../etc");
+  assert.ok(ri >= 0, calls.join(" | "));
+  assert.ok(calls.findIndex((c, i) => i > ri && c.startsWith("commit ")) > ri, "commit comes after the removal");
+  const notice = thread(spool, task.thread).find((l) => l.from === FLEET_ADDRESS && l.subject === "Не всё из ответа выполнено");
+  assert.ok(notice && /\.\.\/etc.*выходит за рабочую копию/.test(notice.body), notice?.body);
+});
+
+test("<delete> from a read-only role is refused, nothing is removed", async () => {
+  const calls: string[] = [];
+  const { sup } = supervisor(
+    [role("auditor")],
+    (i) => (i.batch.primary.from === OWNER_ADDRESS ? `<ack id="${i.batch.primary.id}"/><delete path="src/a.ts"/>` : `<ack id="${i.batch.primary.id}"/>`),
+    calls,
+  );
+  const task = send(spool, { from: OWNER_ADDRESS, to: ["xentra/auditor"], subject: "x", body: "" });
+  await drain(sup);
+  assert.ok(!calls.some((c) => c.startsWith("remove ")));
+  assert.ok(thread(spool, task.thread).some((l) => l.from === FLEET_ADDRESS && /только разработчик/.test(l.body)));
 });

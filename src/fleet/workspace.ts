@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import { checkGateIntegrity } from "../engine/gateIntegrity.js";
 import { commitAll } from "../engine/git.js";
@@ -154,4 +154,63 @@ export async function workspaceChanges(dir: string, baseBranch: string): Promise
 export async function workspaceHead(dir: string): Promise<string> {
   const { stdout } = await execFileAsync("git", ["rev-parse", "HEAD"], { cwd: dir });
   return stdout.trim();
+}
+
+export interface RemoveResult {
+  removed: string[];
+  rejected: Array<{ path: string; reason: string }>;
+}
+
+export const MAX_DELETES_PER_REPLY = 50;
+
+// Why a <delete path> must not run, or undefined if it may. Only paths inside the
+// worktree, never the worktree itself, git internals, the node_modules symlink or env
+// files (agents never touch secrets — roles can't read .env either).
+export function deleteRejection(dir: string, path: string): string | undefined {
+  if (!path || isAbsolute(path) || path.includes("\0")) return "нужен относительный путь внутри репозитория";
+  const root = realpathSync(dir);
+  const target = resolve(root, path);
+  const rel = relative(root, target);
+  if (!rel || rel === "." ) return "нельзя удалить корень репозитория";
+  if (rel === ".." || rel.startsWith(".." + sep) || isAbsolute(rel)) return "путь выходит за рабочую копию";
+  const parts = rel.split(sep);
+  if (parts[0] === ".git" || parts[0] === "node_modules") return `${parts[0]} не трогаю`;
+  if (parts.some((s) => /^\.env(\b|$)|^\.env[-.]/i.test(s))) return "env-файлы удаляет только владелец";
+  // A symlinked parent could point anywhere: the real parent must still be inside.
+  let parent: string;
+  try {
+    parent = realpathSync(dirname(target));
+  } catch {
+    return "такого пути нет";
+  }
+  const relParent = relative(root, parent);
+  if (relParent === ".." || relParent.startsWith(".." + sep) || isAbsolute(relParent)) return "путь выходит за рабочую копию";
+  try {
+    lstatSync(target);
+  } catch {
+    return "такого пути нет";
+  }
+  return undefined;
+}
+
+// Executes <delete path> blocks of an edit role. The supervisor commits right after, so
+// the deletion lands in the thread branch like any other edit (and gate integrity still
+// sees a deleted test file against the base).
+export async function removeInWorkspace(dir: string, paths: string[]): Promise<RemoveResult> {
+  const out: RemoveResult = { removed: [], rejected: [] };
+  for (const [i, path] of paths.entries()) {
+    if (i >= MAX_DELETES_PER_REPLY) {
+      out.rejected.push({ path, reason: `не больше ${MAX_DELETES_PER_REPLY} удалений за ответ` });
+      continue;
+    }
+    const why = deleteRejection(dir, path);
+    if (why) {
+      out.rejected.push({ path, reason: why });
+      continue;
+    }
+    // lstat-based: a symlink is removed as a link, never followed.
+    rmSync(resolve(realpathSync(dir), path), { recursive: true, force: true });
+    out.removed.push(path);
+  }
+  return out;
 }

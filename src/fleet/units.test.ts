@@ -61,7 +61,7 @@ test("parseReplyActions reads mail, ack and gates blocks", () => {
 
 test("parseReplyActions: new thread flag and nothing when there are no blocks", () => {
   assert.equal(parseReplyActions('<mail to="xentra/pm" subject="s" thread="new">b</mail>').mails[0].newThread, true);
-  assert.deepEqual(parseReplyActions("просто текст"), { mails: [], acks: [], gates: false, memory: [], watchCi: false });
+  assert.deepEqual(parseReplyActions("просто текст"), { mails: [], acks: [], deletes: [], gates: false, memory: [], watchCi: false });
 });
 
 // --- gate
@@ -191,4 +191,10 @@ test("a letter body keeps its inline code and code blocks (only blocks quoted OU
   assert.match(a.mails[0].body, /> quoted line inside the body/);
   assert.deepEqual(a.acks, [{ id: "l-1", note: "see `foo`" }]);
   assert.equal(a.memory[0].text, "use `parseFlag` helper");
+});
+
+test("<delete path> blocks are parsed, deduplicated, and ignored inside quoted text", () => {
+  const a = parseReplyActions('<delete path="src/a"/>\n<delete path=\'src/b.ts\'>\n<delete path="src/a"/>\n`<delete path="src/c"/>`\n```\n<delete path="src/d"/>\n```\n> <delete path="src/e"/>');
+  assert.deepEqual(a.deletes, ["src/a", "src/b.ts"]);
+  assert.deepEqual(parseReplyActions("просто текст").deletes, []);
 });

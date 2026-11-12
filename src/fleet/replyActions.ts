@@ -7,6 +7,7 @@ import type { Priority } from "./mail.js";
 //   <memory scope="thread|task" [key=".."]>text</memory>
 //   <watch-ci/>          (letter from ci-watch when the thread MR's pipeline finishes)
 //   <push title=".."/>   (roles with canRequestPush — asks the owner to push + open an MR)
+//   <delete path=".."/>  (edit roles — removes a file or folder in the thread's worktree)
 // Parsed leniently (attribute order, quotes ' or ") and validated later, by the
 // supervisor, against the spool — a bad address fails that one block, not the session.
 
@@ -33,6 +34,7 @@ export interface ReplyActions {
   memory: MemoryAction[];
   push?: { title: string };
   watchCi: boolean;
+  deletes: string[];
 }
 
 const ATTR = /([a-z-]+)\s*=\s*("([^"]*)"|'([^']*)')/gi;
@@ -107,5 +109,10 @@ export function parseReplyActions(raw: string): ReplyActions {
   }
   const pushTag = blocks(raw, text, /<push\b([^>]*?)\/?>/dgi).next().value;
   const pushTitle = pushTag ? attrs(pushTag[1]).title : undefined;
-  return { mails, acks, gates: /<gates\s*\/?>/i.test(text), memory, watchCi: /<watch-ci\s*\/?>/i.test(text), ...(pushTitle ? { push: { title: pushTitle } } : {}) };
+  const deletes: string[] = [];
+  for (const m of blocks(raw, text, /<delete\b([^>]*?)\/?>/dgi)) {
+    const path = attrs(m[1]).path;
+    if (path && !deletes.includes(path)) deletes.push(path);
+  }
+  return { mails, acks, deletes, gates: /<gates\s*\/?>/i.test(text), memory, watchCi: /<watch-ci\s*\/?>/i.test(text), ...(pushTitle ? { push: { title: pushTitle } } : {}) };
 }

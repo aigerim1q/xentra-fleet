@@ -60,6 +60,8 @@ export interface WorkspaceOps {
   changes(dir: string, baseBranch: string): Promise<{ head: string; stat: string; text: string }>;
   // Gate-integrity violations in the thread's diff (engine/gateIntegrity.ts); [] = clean.
   integrity(dir: string, baseBranch: string): Promise<string[]>;
+  // <delete path> of an edit role; optional so test fakes without it keep compiling.
+  remove?(dir: string, paths: string[]): Promise<{ removed: string[]; rejected: Array<{ path: string; reason: string }> }>;
 }
 
 export interface SupervisorOptions {
@@ -477,6 +479,19 @@ export class Supervisor {
         const key = m.key ?? keys[0];
         if (key && /^[A-Z][A-Z0-9]+-\d+$/.test(key)) appendMemory(this.o.stateDir, "task", key, { role: role.role, text: m.text });
         else problems.push("память задачи не записана: у треда нет ключа Jira — укажи key=\"XEN-…\" в блоке <memory>");
+      }
+    }
+
+    if (outcome.actions.deletes.length > 0) {
+      if (role.access !== "edit" || !this.o.workspace.remove) {
+        problems.push("<delete> не выполнен: удалять файлы может только разработчик своего треда");
+      } else {
+        const r = await this.o.workspace.remove(cwd, outcome.actions.deletes).catch((err) => ({
+          removed: [] as string[],
+          rejected: outcome.actions.deletes.map((path) => ({ path, reason: (err as Error).message.slice(0, 200) })),
+        }));
+        if (r.removed.length > 0) this.log(`${role.role}: removed ${r.removed.join(", ")} in ${cwd}`);
+        for (const x of r.rejected) problems.push(`<delete path="${x.path}"> не выполнен: ${x.reason}`);
       }
     }
 

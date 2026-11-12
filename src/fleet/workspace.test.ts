@@ -1,10 +1,10 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ensureWorkspace, workspaceHead, type RepoTarget } from "./workspace.js";
+import { deleteRejection, ensureWorkspace, removeInWorkspace, workspaceHead, type RepoTarget } from "./workspace.js";
 
 let home: string;
 let repoDir: string;
@@ -47,4 +47,32 @@ test("a worktree whose directory was deleted by hand is re-created on the same b
   assert.equal(again, dir);
   assert.ok(existsSync(join(dir, "work.txt")), "the thread's commit is still there");
   assert.equal(await workspaceHead(dir), sha);
+});
+
+test("removeInWorkspace deletes files and folders inside the worktree and refuses everything else", async () => {
+  const base = mkdtempSync(join(tmpdir(), "fleet-rm-"));
+  try {
+    const wt = join(base, "wt");
+    const outside = join(base, "outside");
+    mkdirSync(join(wt, "src/old"), { recursive: true });
+    mkdirSync(join(wt, ".git"));
+    mkdirSync(outside);
+    writeFileSync(join(wt, "src/old/a.ts"), "x");
+    writeFileSync(join(wt, "src/keep.ts"), "x");
+    writeFileSync(join(wt, ".env-example"), "x");
+    writeFileSync(join(outside, "secret"), "x");
+    symlinkSync(outside, join(wt, "link"));
+    const r = await removeInWorkspace(wt, ["src/old", "../outside", "/etc/hosts", ".git", ".env-example", "link/secret", "src/missing", "", "."]);
+    assert.deepEqual(r.removed, ["src/old"]);
+    assert.deepEqual(r.rejected.map((x) => x.path), ["../outside", "/etc/hosts", ".git", ".env-example", "link/secret", "src/missing", "", "."]);
+    assert.ok(!existsSync(join(wt, "src/old")));
+    assert.ok(existsSync(join(wt, "src/keep.ts")));
+    assert.ok(existsSync(join(outside, "secret")), "a path through a symlink out of the worktree is not followed");
+    // The symlink itself may go — as a link, without touching its target.
+    assert.equal(deleteRejection(wt, "link"), undefined);
+    await removeInWorkspace(wt, ["link"]);
+    assert.ok(existsSync(join(outside, "secret")));
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
 });

@@ -156,7 +156,7 @@ export async function commitAll(worktreeDir: string, message: string): Promise<b
 // it doesn't change what a later `commitAll`'s own `git add -A` actually commits.
 export async function getWorktreeDiff(worktreeDir: string, baseBranch: string): Promise<string> {
   await execFileAsync("git", ["add", "-N", "."], { cwd: worktreeDir });
-  const { stdout } = await execFileAsync("git", ["diff", baseBranch], { cwd: worktreeDir, maxBuffer: 1024 * 1024 * 10 });
+  const { stdout } = await execFileAsync("git", ["diff", "-M", baseBranch], { cwd: worktreeDir, maxBuffer: 1024 * 1024 * 10 });
   return stdout;
 }
 

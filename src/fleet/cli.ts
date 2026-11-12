@@ -12,7 +12,7 @@ import { pollCi, pollJira, type WatcherDeps } from "./watchers.js";
 import { JiraClient } from "../jira/client.js";
 import { getFailedJobs, getMergeRequestPipeline } from "../gitlab.js";
 import { secretValues } from "../config.js";
-import { commitWorkspace, ensureWorkspace, fleetHome, runWorkspaceGates, workspaceChanges, workspaceDiff, workspaceHead, workspaceIntegrity, type RepoTarget } from "./workspace.js";
+import { commitWorkspace, ensureWorkspace, fleetHome, runWorkspaceGates, workspaceChanges, workspaceDiff, workspaceHead, workspaceIntegrity, removeInWorkspace, type RepoTarget } from "./workspace.js";
 import { mergeModeFromEnv, pollMerges } from "./mergeBot.js";
 import { computeMetrics, formatMetrics } from "./metrics.js";
 import { DEPUTY_THREAD, fleetSnapshot } from "./deputy.js";
@@ -41,7 +41,7 @@ async function buildSupervisor(log: (l: string) => void, opts: { limits: boolean
     repos: { backend: repo("backend"), frontend: repo("frontend") },
     stateDir,
     runSession: runRoleSession,
-    workspace: { ensure: ensureWorkspace, commit: commitWorkspace, gates: runWorkspaceGates, diffStat: workspaceDiff, headSha: workspaceHead, changes: workspaceChanges, integrity: workspaceIntegrity },
+    workspace: { ensure: ensureWorkspace, commit: commitWorkspace, gates: runWorkspaceGates, diffStat: workspaceDiff, headSha: workspaceHead, changes: workspaceChanges, integrity: workspaceIntegrity, remove: removeInWorkspace },
     log,
     limits: opts.limits ? new FleetLimits(join(fleetHome(), "state")) : undefined,
   });
