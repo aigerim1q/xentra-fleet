@@ -1,52 +1,13 @@
+// The old dashboard (/): HTML, CSS and JS served as three files so the page can run
+// under the same strict CSP as the console (no inline script or style), and data is
+// rendered only as text nodes. The script is the original two-script page in one file.
 export const DASHBOARD_PAGE = `<!doctype html>
 <html lang="ru">
 <head>
 <meta charset="utf-8">
 <meta name="dashboard-token" content="__DASHBOARD_TOKEN__">
 <title>Харнесс Jira</title>
-<style>
-  body { font-family: -apple-system, system-ui, sans-serif; background: #0f1115; color: #e6e6e6; margin: 0; padding: 24px; }
-  h1 { font-size: 18px; margin: 0 0 4px; }
-  .sub { color: #888; font-size: 13px; margin-bottom: 20px; }
-  .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; }
-  .badge.on { background: #1f6f3f; color: #c6f6d5; }
-  .badge.off { background: #4a4a4a; color: #ddd; }
-  .card { background: #171a21; border: 1px solid #262b36; border-radius: 10px; padding: 16px; margin-bottom: 16px; }
-  .phase { font-size: 13px; color: #9fd3ff; text-transform: uppercase; letter-spacing: 0.05em; }
-  .bar-bg { background: #262b36; border-radius: 6px; height: 8px; margin: 8px 0; overflow: hidden; }
-  .bar-fg { background: #4c8bf5; height: 100%; transition: width .3s; }
-  table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #262b36; }
-  th { color: #888; font-weight: 500; }
-  .outcome-closed { color: #7ee787; }
-  .outcome-needs_human { color: #f0b429; }
-  .outcome-skipped { color: #888; }
-  a { color: #9fd3ff; }
-  .empty { color: #666; font-style: italic; }
-  .stats { display: flex; gap: 24px; font-size: 13px; color: #aaa; flex-wrap: wrap; }
-  .stats b { color: #e6e6e6; }
-  .scene-wrap { display: flex; justify-content: center; background: #0b0d11; border-radius: 10px; padding: 8px; margin-bottom: 8px; border: 1px solid #262b36; }
-  #scene { image-rendering: pixelated; width: 100%; max-width: 640px; height: auto; }
-  .scene-caption { text-align: center; font-size: 12px; color: #777; margin: 0 0 16px; text-transform: uppercase; letter-spacing: 0.08em; }
-  .log-panel { background: #0b0d11; border-radius: 6px; padding: 8px 10px; margin-top: 10px; font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: #9fe6a0; height: 140px; overflow-y: auto; white-space: pre-wrap; }
-  .log-panel div { padding: 1px 0; }
-  .ticket-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid #262b36; }
-  .ticket-row:last-child { border-bottom: none; }
-  .ticket-main { flex: 1; min-width: 0; }
-  .ticket-title { font-size: 13px; }
-  .ticket-meta { font-size: 12px; color: #888; margin-top: 2px; }
-  .ticket-desc { font-size: 12px; color: #999; margin-top: 4px; white-space: pre-wrap; }
-  .start-btn { background: #2d5fd1; color: #fff; border: none; border-radius: 6px; padding: 6px 14px; font-size: 12px; cursor: pointer; white-space: nowrap; }
-  .start-btn:disabled { background: #333; color: #777; cursor: not-allowed; }
-  .repo-tag { display: inline-block; font-size: 11px; padding: 1px 6px; border-radius: 4px; background: #262b36; color: #aaa; margin-left: 6px; }
-  .repo-tag.route-unknown, .repo-tag.route-ambiguous { background: #4a2e1a; color: #f0b429; }
-  .tabbar { display: flex; gap: 4px; margin-bottom: 6px; border-bottom: 1px solid #262b36; }
-  .tab-btn { background: none; border: none; color: #999; padding: 10px 16px; font-size: 13px; cursor: pointer; border-bottom: 2px solid transparent; }
-  .tab-btn.active { color: #e6e6e6; border-bottom-color: #4c8bf5; }
-  .tab-hint { font-size: 12px; color: #666; margin: 8px 0 14px; }
-  .tab-panel { display: none; }
-  .tab-panel.active { display: block; }
-</style>
+<link rel="stylesheet" href="/dashboard.css">
 </head>
 <body>
   <h1>Харнесс задач Jira</h1>
@@ -91,7 +52,73 @@ export const DASHBOARD_PAGE = `<!doctype html>
     </div>
   </div>
 
-<script>
+
+<script src="/dashboard.js"></script>
+</body>
+</html>
+`;
+
+export const DASHBOARD_CSS = `  body { font-family: -apple-system, system-ui, sans-serif; background: #0f1115; color: #e6e6e6; margin: 0; padding: 24px; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .sub { color: #888; font-size: 13px; margin-bottom: 20px; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; }
+  .badge.on { background: #1f6f3f; color: #c6f6d5; }
+  .badge.off { background: #4a4a4a; color: #ddd; }
+  .card { background: #171a21; border: 1px solid #262b36; border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+  .phase { font-size: 13px; color: #9fd3ff; text-transform: uppercase; letter-spacing: 0.05em; }
+  .bar-bg { background: #262b36; border-radius: 6px; height: 8px; margin: 8px 0; overflow: hidden; }
+  .bar-fg { background: #4c8bf5; height: 100%; transition: width .3s; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #262b36; }
+  th { color: #888; font-weight: 500; }
+  .outcome-closed { color: #7ee787; }
+  .outcome-needs_human { color: #f0b429; }
+  .outcome-skipped { color: #888; }
+  a { color: #9fd3ff; }
+  .empty { color: #666; font-style: italic; }
+  .stats { display: flex; gap: 24px; font-size: 13px; color: #aaa; flex-wrap: wrap; }
+  .stats b { color: #e6e6e6; }
+  .scene-wrap { display: flex; justify-content: center; background: #0b0d11; border-radius: 10px; padding: 8px; margin-bottom: 8px; border: 1px solid #262b36; }
+  #scene { image-rendering: pixelated; width: 100%; max-width: 640px; height: auto; }
+  .scene-caption { text-align: center; font-size: 12px; color: #777; margin: 0 0 16px; text-transform: uppercase; letter-spacing: 0.08em; }
+  .log-panel { background: #0b0d11; border-radius: 6px; padding: 8px 10px; margin-top: 10px; font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: #9fe6a0; height: 140px; overflow-y: auto; white-space: pre-wrap; }
+  .log-panel div { padding: 1px 0; }
+  .ticket-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid #262b36; }
+  .ticket-row:last-child { border-bottom: none; }
+  .ticket-main { flex: 1; min-width: 0; }
+  .ticket-title { font-size: 13px; }
+  .ticket-meta { font-size: 12px; color: #888; margin-top: 2px; }
+  .ticket-desc { font-size: 12px; color: #999; margin-top: 4px; white-space: pre-wrap; }
+  .start-btn { background: #2d5fd1; color: #fff; border: none; border-radius: 6px; padding: 6px 14px; font-size: 12px; cursor: pointer; white-space: nowrap; }
+  .start-btn:disabled { background: #333; color: #777; cursor: not-allowed; }
+  .repo-tag { display: inline-block; font-size: 11px; padding: 1px 6px; border-radius: 4px; background: #262b36; color: #aaa; margin-left: 6px; }
+  .repo-tag.route-unknown, .repo-tag.route-ambiguous { background: #4a2e1a; color: #f0b429; }
+  .tabbar { display: flex; gap: 4px; margin-bottom: 6px; border-bottom: 1px solid #262b36; }
+  .tab-btn { background: none; border: none; color: #999; padding: 10px 16px; font-size: 13px; cursor: pointer; border-bottom: 2px solid transparent; }
+  .tab-btn.active { color: #e6e6e6; border-bottom-color: #4c8bf5; }
+  .tab-hint { font-size: 12px; color: #666; margin: 8px 0 14px; }
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+`;
+
+export const DASHBOARD_JS = `// Data is rendered as text nodes only — never as HTML (same rule as the console).
+function el(tag, attrs) {
+  const node = document.createElement(tag);
+  Object.keys(attrs || {}).forEach(function (k) {
+    if (k === "class") node.className = attrs[k];
+    else node.setAttribute(k, attrs[k]);
+  });
+  for (var i = 2; i < arguments.length; i++) {
+    const kid = arguments[i];
+    if (kid == null) continue;
+    node.appendChild(typeof kid === "string" ? document.createTextNode(kid) : kid);
+  }
+  return node;
+}
+function clear(node) {
+  while (node.firstChild) node.removeChild(node.firstChild);
+}
+
 var TAB_HINTS = {
   task: "Что сейчас делает агент и прогресс по текущей задаче",
   queue: "Тикеты из Jira — выбери и нажми «Предложить», подтверждение — в Telegram",
@@ -158,34 +185,46 @@ async function tick() {
 
   const jobCard = document.getElementById("current-job-card");
   const job = data.live.currentJob;
+  clear(jobCard);
   if (!job) {
-    jobCard.innerHTML = '<div class="empty">сейчас ничего не выполняется</div>';
+    jobCard.appendChild(el("div", { class: "empty" }, "сейчас ничего не выполняется"));
   } else {
     const pct = Math.min(100, Math.round((job.iteration / job.maxIterations) * 100));
-    jobCard.innerHTML =
-      '<div><b>' + job.issueKey + '</b>: ' + job.title.replace(/</g, "&lt;") + '</div>' +
-      '<div class="sub">' + (REPO_RU[job.repo] || job.repo) + ' &middot; прошло ' + fmtElapsed(job.startedAt) + '</div>' +
-      '<div class="phase">' + (PHASE_RU[job.phase] || job.phase) + ' (итерация ' + job.iteration + '/' + job.maxIterations + ')</div>' +
-      '<div class="bar-bg"><div class="bar-fg" style="width:' + pct + '%"></div></div>' +
-      '<div>потрачено: $' + job.costUsd.toFixed(4) + '</div>' +
-      (job.description ? '<details style="margin-top:8px"><summary class="sub">описание тикета</summary><div class="sub" style="white-space:pre-wrap;margin-top:4px">' + job.description.slice(0, 1500).replace(/</g, "&lt;") + '</div></details>' : '') +
-      '<div class="log-panel" id="log-panel"></div>';
-    const panel = document.getElementById("log-panel");
-    panel.innerHTML = job.logs.map(function (l) { return '<div>' + l.replace(/</g, "&lt;") + '</div>'; }).join("");
+    jobCard.appendChild(el("div", {}, el("b", {}, job.issueKey), ": " + job.title));
+    jobCard.appendChild(el("div", { class: "sub" }, (REPO_RU[job.repo] || job.repo) + " · прошло " + fmtElapsed(job.startedAt)));
+    jobCard.appendChild(el("div", { class: "phase" }, (PHASE_RU[job.phase] || job.phase) + " (итерация " + job.iteration + "/" + job.maxIterations + ")"));
+    const bar = el("div", { class: "bar-bg" }, el("div", { class: "bar-fg" }));
+    bar.firstChild.style.width = pct + "%";
+    jobCard.appendChild(bar);
+    jobCard.appendChild(el("div", {}, "потрачено: $" + job.costUsd.toFixed(4)));
+    if (job.description) {
+      const body = el("div", { class: "sub" }, job.description.slice(0, 1500));
+      body.style.whiteSpace = "pre-wrap";
+      body.style.marginTop = "4px";
+      const details = el("details", {}, el("summary", { class: "sub" }, "описание тикета"), body);
+      details.style.marginTop = "8px";
+      jobCard.appendChild(details);
+    }
+    const panel = el("div", { class: "log-panel", id: "log-panel" });
+    job.logs.forEach(function (l) { panel.appendChild(el("div", {}, l)); });
+    jobCard.appendChild(panel);
     panel.scrollTop = panel.scrollHeight;
   }
 
   const body = document.getElementById("history-body");
-  body.innerHTML = data.history.map(function (r) {
-    const detail = r.outcome === "closed"
-      ? '<a href="' + r.detail + '" target="_blank">MR</a>'
-      : r.detail.replace(/</g, "&lt;");
-    return '<tr><td>' + r.issueKey + '</td>' +
-      '<td class="outcome-' + r.outcome + '">' + (OUTCOME_RU[r.outcome] || r.outcome) + '</td>' +
-      '<td>' + detail + '</td>' +
-      '<td>$' + r.costUsd.toFixed(4) + '</td>' +
-      '<td>' + new Date(r.timestamp).toLocaleString("ru-RU") + '</td></tr>';
-  }).join("") || '<tr><td colspan="5" class="empty">задач пока нет</td></tr>';
+  clear(body);
+  if (data.history.length === 0) {
+    body.appendChild(el("tr", {}, el("td", { colspan: "5", class: "empty" }, "задач пока нет")));
+  }
+  data.history.forEach(function (r) {
+    const detail = r.outcome === "closed" ? el("a", { href: r.detail, target: "_blank", rel: "noopener" }, "MR") : r.detail;
+    body.appendChild(el("tr", {},
+      el("td", {}, r.issueKey),
+      el("td", { class: "outcome-" + r.outcome }, OUTCOME_RU[r.outcome] || r.outcome),
+      el("td", {}, detail),
+      el("td", {}, "$" + r.costUsd.toFixed(4)),
+      el("td", {}, new Date(r.timestamp).toLocaleString("ru-RU"))));
+  });
 }
 
 async function startTicket(key, btn) {
@@ -217,23 +256,30 @@ async function loadTickets() {
   try {
     const res = await fetch("/api/tickets");
     const tickets = await res.json();
+    clear(container);
     if (!Array.isArray(tickets) || tickets.length === 0) {
-      container.innerHTML = '<div class="empty">очередь пуста</div>';
+      container.appendChild(el("div", { class: "empty" }, "очередь пуста"));
       return;
     }
-    container.innerHTML = tickets.map(function (t) {
+    tickets.forEach(function (t) {
       const routable = t.repo === "backend" || t.repo === "frontend" || t.repo === "ambiguous";
-      const tagClass = routable ? "" : " route-" + t.repo;
-      return '<div class="ticket-row">' +
-        '<div class="ticket-main">' +
-          '<div class="ticket-title"><b>' + t.key + '</b>: ' + t.summary.replace(/</g, "&lt;") + '<span class="repo-tag' + tagClass + '">' + (REPO_RU[t.repo] || t.repo) + '</span></div>' +
-          '<div class="ticket-desc">' + t.description.slice(0, 220).replace(/</g, "&lt;") + '</div>' +
-        '</div>' +
-        '<button class="start-btn" onclick="startTicket(\\'' + t.key + '\\', this)"' + (routable ? '' : ' disabled title="не удаётся определить репозиторий автоматически"') + '>Предложить</button>' +
-      '</div>';
-    }).join("");
+      const btn = el("button", { class: "start-btn" }, "Предложить");
+      if (!routable) {
+        btn.disabled = true;
+        btn.title = "не удаётся определить репозиторий автоматически";
+      }
+      btn.addEventListener("click", function () { startTicket(t.key, btn); });
+      const desc = el("div", { class: "ticket-desc" }, t.description.slice(0, 220));
+      container.appendChild(el("div", { class: "ticket-row" },
+        el("div", { class: "ticket-main" },
+          el("div", { class: "ticket-title" }, el("b", {}, t.key), ": " + t.summary,
+            el("span", { class: "repo-tag" + (routable ? "" : " route-" + t.repo) }, REPO_RU[t.repo] || t.repo)),
+          desc),
+        btn));
+    });
   } catch (e) {
-    container.innerHTML = '<div class="empty">не удалось загрузить: ' + e.message + '</div>';
+    clear(container);
+    container.appendChild(el("div", { class: "empty" }, "не удалось загрузить: " + e.message));
   }
 }
 
@@ -241,9 +287,7 @@ tick();
 setInterval(tick, 2000);
 loadTickets();
 setInterval(loadTickets, 15000);
-</script>
 
-<script>
 // Пиксель-арт пародия на "Тайную вечерю": зал с окнами и гобеленами, длинный
 // стол с белой скатертью, фигуры-"агенты" в разноцветных одеждах. В простое —
 // каждый в своём ритме подносит кубок ко рту. В работе — по цепочке из рук в
@@ -430,7 +474,4 @@ function drawScene() {
 
 drawScene();
 setInterval(drawScene, 90);
-</script>
-</body>
-</html>
 `;

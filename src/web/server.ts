@@ -3,8 +3,8 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import { getLiveState } from "../bot/liveState.js";
 import { loadState, totalCostUsd, costSince, startOfTodayIso } from "../bot/state.js";
 import { listCandidates, proposeIssueByKey, type Proposal } from "../queue.js";
-import { DASHBOARD_PAGE } from "./page.js";
-import { handleConsole } from "./console/routes.js";
+import { DASHBOARD_CSS, DASHBOARD_JS, DASHBOARD_PAGE } from "./page.js";
+import { CSP, handleConsole } from "./console/routes.js";
 
 let server: Server | null = null;
 let ticketsCache: { at: number; data: unknown } | null = null;
@@ -42,6 +42,18 @@ export function hasValidToken(req: IncomingMessage, token: string = dashboardTok
   const given = req.headers["x-dashboard-token"];
   if (typeof given !== "string" || given.length !== token.length) return false;
   return timingSafeEqual(Buffer.from(given), Buffer.from(token));
+}
+
+// The old dashboard under the console's CSP: no inline script/style, so its script and
+// stylesheet are separate files; any XSS there would otherwise sit on the console's
+// origin with the console's token.
+export function dashboardAsset(url: string, token: string): { headers: Record<string, string>; body: string } {
+  if (url === "/dashboard.js") return { headers: { "Content-Type": "text/javascript; charset=utf-8", "Content-Security-Policy": CSP }, body: DASHBOARD_JS };
+  if (url === "/dashboard.css") return { headers: { "Content-Type": "text/css; charset=utf-8" }, body: DASHBOARD_CSS };
+  return {
+    headers: { "Content-Type": "text/html; charset=utf-8", "Content-Security-Policy": CSP, "Cache-Control": "no-store" },
+    body: DASHBOARD_PAGE.replace("__DASHBOARD_TOKEN__", token),
+  };
 }
 
 export function startDashboardServer(port: number, onProposal?: (proposal: Proposal) => void): void {
@@ -101,8 +113,9 @@ export function startDashboardServer(port: number, onProposal?: (proposal: Propo
       return;
     }
 
-    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-    res.end(DASHBOARD_PAGE.replace("__DASHBOARD_TOKEN__", dashboardToken));
+    const r = dashboardAsset(req.url ?? "/", dashboardToken);
+    res.writeHead(200, r.headers);
+    res.end(r.body);
   });
   server.listen(port, LOOPBACK);
 }
