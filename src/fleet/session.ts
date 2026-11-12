@@ -19,6 +19,8 @@ export interface ThreadState {
   model: string;
   engine: Role["engine"];
   updatedAt: string;
+  // claude's cumulative total_cost_usd for sessionId — the next resumed run subtracts it.
+  costTotalUsd?: number;
 }
 
 export interface SessionOutcome {
@@ -161,7 +163,9 @@ export const runRoleSession: SessionRunner = async (input) => {
     return { ok: true, actions: parseReplyActions(run.text), resultText: run.text, costUsd: 0 };
   }
 
-  const resumeId = resumableSession(readThreadState(stateDir, role.role, batch.thread), role, cwd);
+  const prevState = readThreadState(stateDir, role.role, batch.thread);
+  const resumeId = resumableSession(prevState, role, cwd);
+  const priorCost = resumeId && prevState?.sessionId === resumeId ? prevState.costTotalUsd : undefined;
   const disallowed =
     role.access === "edit" ? buildDisallowedTools() : withAlwaysDisallowed("Bash,Edit,Write,MultiEdit,NotebookEdit");
   try {
@@ -171,6 +175,7 @@ export const runRoleSession: SessionRunner = async (input) => {
         prompt: buildSessionPrompt(input, !!resumeId),
         permissionMode: "acceptEdits",
         resumeSessionId: resumeId,
+        priorSessionCostUsd: priorCost,
         disallowedToolsOverride: disallowed,
         model: role.model,
         turnTimeoutMs: role.sessionTimeoutMs,
@@ -185,10 +190,11 @@ export const runRoleSession: SessionRunner = async (input) => {
         model: role.model,
         engine: "claude",
         updatedAt: new Date().toISOString(),
+        costTotalUsd: turn.totalCostUsd,
       });
     }
     const actions = parseReplyActions(turn.resultText);
-    return { ok: !turn.isError, actions, resultText: turn.resultText, costUsd: turn.totalCostUsd, error: turn.isError ? turn.resultText.slice(0, 200) : undefined };
+    return { ok: !turn.isError, actions, resultText: turn.resultText, costUsd: turn.runCostUsd, error: turn.isError ? turn.resultText.slice(0, 200) : undefined };
   } catch (err) {
     // A killed session (watchdog, ceiling, the owner's "прервать") is still resumable and
     // still cost something: its id and the usage-based estimate are kept.
@@ -200,6 +206,8 @@ export const runRoleSession: SessionRunner = async (input) => {
         model: role.model,
         engine: "claude",
         updatedAt: new Date().toISOString(),
+        // The killed run's own estimate on top of what the session had cost before it.
+        costTotalUsd: killed.sessionId === resumeId ? (priorCost ?? 0) + killed.costUsd : killed.costUsd,
       });
     }
     // A resume that points at a session claude no longer has: forget it, next try is fresh.

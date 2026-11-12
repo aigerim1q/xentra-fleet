@@ -55,6 +55,9 @@ interface RunClaudeTurnOptions {
   prompt: string;
   permissionMode: string;
   resumeSessionId?: string;
+  // The resumed session's cumulative cost so far, when the caller persisted it (survives
+  // restarts); otherwise the last total this process saw for that session is used.
+  priorSessionCostUsd?: number;
   maxBudgetUsd?: number;
   extraDeniedPaths?: string[];
   // Bypasses the default guardrail deny-list with a caller-supplied value —
@@ -188,6 +191,16 @@ export function summarizeToolUse(name: string, input: Record<string, unknown>): 
 // "user" for tool results, and a final "result" line shaped exactly like the
 // single-shot `--output-format json` result — so the existing result parsing
 // below needs no change, just finding that one line instead of the whole blob.
+// claude's result event reports total_cost_usd for the whole session — a resumed turn
+// includes every earlier turn. Adding those totals up counts each turn again on every
+// resume (a 10-turn thread looked ~5× as expensive as it was).
+const lastSessionTotal = new Map<string, number>();
+
+export function runCost(total: number, resumedId: string | undefined, sessionId: string, prior: number | undefined): number {
+  if (!resumedId || resumedId !== sessionId || prior === undefined || total < prior) return total;
+  return total - prior;
+}
+
 export async function runClaudeTurn(opts: RunClaudeTurnOptions): Promise<ClaudeTurnResult> {
   // The agent only edits files; git (commit/push/MR) stays in the harness's own
   // hands, not the model's — also sidesteps Auto Mode's Bash classifier, which
@@ -331,6 +344,11 @@ export async function runClaudeTurn(opts: RunClaudeTurnOptions): Promise<ClaudeT
 
   const raw = resultLine as Record<string, unknown>;
   const usage = (raw.usage as Record<string, unknown>) ?? {};
+  const totalCostUsd = Number(raw.total_cost_usd ?? 0);
+  const turnSessionId = String(raw.session_id ?? "");
+  const prior = opts.priorSessionCostUsd ?? (opts.resumeSessionId ? lastSessionTotal.get(opts.resumeSessionId) : undefined);
+  const runCostUsd = runCost(totalCostUsd, opts.resumeSessionId, turnSessionId, prior);
+  if (turnSessionId) lastSessionTotal.set(turnSessionId, totalCostUsd);
   return {
     sessionId: String(raw.session_id ?? ""),
     // Scrubbed here, once, for every role — implement/acceptance's resultText is just
@@ -340,7 +358,8 @@ export async function runClaudeTurn(opts: RunClaudeTurnOptions): Promise<ClaudeT
     resultText: scrubSecrets(String(raw.result ?? ""), secretValues()),
     isError: Boolean(raw.is_error),
     terminalReason: String(raw.terminal_reason ?? "unknown"),
-    totalCostUsd: Number(raw.total_cost_usd ?? 0),
+    totalCostUsd,
+    runCostUsd,
     usage: {
       inputTokens: Number(usage.input_tokens ?? 0),
       outputTokens: Number(usage.output_tokens ?? 0),

@@ -235,7 +235,11 @@ export interface ClaudeTurnResult {
   resultText: string;
   isError: boolean;
   terminalReason: string;
+  // As claude reports it: CUMULATIVE over the whole session, resumed turns included.
   totalCostUsd: number;
+  // What THIS turn cost: totalCostUsd minus what the resumed session had already cost.
+  // Budgets and daily limits add this one up, never totalCostUsd.
+  runCostUsd: number;
   // Summed over every model call in the turn — NOT the context size.
   usage: ClaudeTurnUsage;
   // The real context the model saw: input + cache tokens of the turn's LAST model call.

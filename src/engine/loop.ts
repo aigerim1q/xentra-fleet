@@ -224,7 +224,7 @@ async function runPostImplementSuccess(
         model: config.model,
         onLog: config.onLog,
       });
-      totalCostUsd += fixTurn.totalCostUsd;
+      totalCostUsd += fixTurn.runCostUsd;
       resumeSessionId = fixTurn.sessionId;
       writeTaskContext(task.id, "dev", `round-${round}-response.md`, fixTurn.resultText);
 

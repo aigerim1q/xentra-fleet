@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildAgentEnv, buildRepoCodeEnv } from "./claudeEngine.js";
+import { buildAgentEnv, buildRepoCodeEnv, runCost } from "./claudeEngine.js";
 
 test("buildAgentEnv strips every harness secret, leaving everything else untouched", () => {
   const source = {
@@ -68,4 +68,13 @@ test("buildRepoCodeEnv also drops engine credentials that agents keep, but not n
   assert.equal(env.CLAUDE_CONFIG_DIR, "/c");
   assert.equal(env.PATH, "/bin");
   assert.equal(buildRepoCodeEnv({ ...source, AGENT_ENV_KEEP: "OPENAI_API_KEY" }).OPENAI_API_KEY, "o");
+});
+
+test("runCost: a resumed turn costs its total minus what the session had cost before", () => {
+  assert.equal(runCost(0.32, undefined, "s1", undefined), 0.32);
+  assert.ok(Math.abs(runCost(0.46, "s1", "s1", 0.32) - 0.14) < 1e-9);
+  // Unknown prior, a different (forked/fresh) session or a total that went down: the whole total.
+  assert.equal(runCost(0.46, "s1", "s1", undefined), 0.46);
+  assert.equal(runCost(0.2, "s1", "s2", 0.32), 0.2);
+  assert.equal(runCost(0.1, "s1", "s1", 0.32), 0.1);
 });
