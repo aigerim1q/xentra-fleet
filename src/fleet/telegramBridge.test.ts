@@ -270,3 +270,59 @@ test("fleetSnapshot lists who works, queues and the week's threads, not the depu
     rm(dir, { recursive: true, force: true });
   }
 });
+
+test("every button fits Telegram's 64-byte callback_data cap, and «Прочитано» archives the letter", async () => {
+  const { CALLBACK_DATA_MAX_BYTES } = await import("./telegramBridge.js");
+  const spool = new Spool();
+  spool.register(OWNER_ADDRESS);
+  spool.register(FLEET_ADDRESS);
+  const subject = "Запрос на push: XEN-55 fix archived filter in documents list and pagination";
+  const l = send(spool, { from: FLEET_ADDRESS, to: [OWNER_ADDRESS], subject, body: "stat" });
+  assert.ok(Buffer.byteLength(`fleet_read:${l.id}`) > CALLBACK_DATA_MAX_BYTES, "the raw id must not fit, or this test proves nothing");
+  const { bot, sent, tap } = fakeBot();
+  const stop = installOwnerBridge(bot, 7, { pollMs: 60_000 });
+  try {
+    await new Promise((r) => setTimeout(r, 50));
+    const m = sent.find((x) => x.text.includes(subject))!;
+    const buttons = (m.markup as { inline_keyboard: Array<Array<{ callback_data: string }>> }).inline_keyboard.flat();
+    assert.ok(buttons.length > 0);
+    for (const b of buttons) assert.ok(Buffer.byteLength(b.callback_data) <= CALLBACK_DATA_MAX_BYTES, b.callback_data);
+    const read = buttons.find((b) => b.callback_data.startsWith("fleet_read:"))!;
+    assert.ok(readInbox(spool, OWNER_ADDRESS).some((x) => x.id === l.id));
+    await bot.handleUpdate(tap(read.callback_data));
+    assert.ok(!readInbox(spool, OWNER_ADDRESS).some((x) => x.id === l.id), "tapping «Прочитано» archives the letter");
+  } finally {
+    stop.stop();
+  }
+});
+
+test("a letter that cannot be forwarded is skipped after a few tries instead of blocking the queue", async () => {
+  const { MAX_FORWARD_FAILURES } = await import("./telegramBridge.js");
+  const spool = new Spool();
+  spool.register(OWNER_ADDRESS);
+  spool.register("xentra/dev-1");
+  const bad = send(spool, { from: "xentra/dev-1", to: [OWNER_ADDRESS], subject: "BADLETTER", body: "x" });
+  const good = send(spool, { from: "xentra/dev-1", to: [OWNER_ADDRESS], subject: "GOODLETTER", body: "y" }, new Date(Date.now() + 1000));
+  const sent: string[] = [];
+  let nextId = 700;
+  const bot = new Bot("1:fake", { botInfo: { id: 1, is_bot: true, first_name: "b", username: "b", can_join_groups: false, can_read_all_group_messages: false, supports_inline_queries: false, can_connect_to_business: false, has_main_web_app: false } as never });
+  bot.api.config.use(async (_prev, method, payload) => {
+    if (method === "sendMessage") {
+      const text = (payload as { text: string }).text;
+      if (text.includes("«BADLETTER»")) throw new Error("Bad Request: BUTTON_DATA_INVALID");
+      sent.push(text);
+      return { ok: true, result: { message_id: nextId++, date: 0, chat: { id: 7, type: "private" } } } as never;
+    }
+    return { ok: true, result: true } as never;
+  });
+  const stop = installOwnerBridge(bot, 7, { pollMs: 20 });
+  try {
+    await new Promise((r) => setTimeout(r, 20 * (MAX_FORWARD_FAILURES + 3)));
+    assert.ok(sent.some((t) => t.includes("GOODLETTER")), `the letter behind the bad one must get through: ${JSON.stringify(sent)}`);
+    assert.ok(sent.some((t) => t.includes("Не смогла переслать") && t.includes(bad.id)), "the owner is told which letter was skipped");
+    assert.ok(readInbox(spool, OWNER_ADDRESS).some((x) => x.id === bad.id), "the skipped letter stays in the mailbox");
+    assert.ok(readInbox(spool, OWNER_ADDRESS).some((x) => x.id === good.id));
+  } finally {
+    stop.stop();
+  }
+});

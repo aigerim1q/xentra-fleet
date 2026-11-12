@@ -43,7 +43,15 @@ interface BridgeState {
   // Short tokens for button data (Telegram caps it at 64 bytes; ids and paths are longer).
   tokens?: Record<string, string>;
   nextToken?: number;
+  // letter id -> how many times forwarding it failed (see MAX_FORWARD_FAILURES)
+  failed?: Record<string, number>;
 }
+
+// A letter whose forwarding keeps failing (Telegram rejects the message, network) is
+// skipped after this many ticks so it can't block every letter behind it forever.
+export const MAX_FORWARD_FAILURES = 3;
+// Telegram's hard cap on inline button callback_data.
+export const CALLBACK_DATA_MAX_BYTES = 64;
 
 export interface OwnerBridge {
   stop(): void;
@@ -195,12 +203,26 @@ export function installOwnerBridge(
         if (l.from === FLEET_ADDRESS && l.subject.startsWith("Готово к мержу") && loadPush(stateDir, l.thread)?.mr) {
           kb.text("🔀 Смержить", `fleet_merge:${tokenFor(l.thread)}`).row();
         }
-        kb.text("✅ Прочитано", `fleet_read:${l.id}`);
+        // Letter ids carry the subject slug (up to ~80 bytes): a token, like every other button.
+        kb.text("✅ Прочитано", `fleet_read:${tokenFor(l.id)}`);
         const msg = await bot.api.sendMessage(chatId, formatForTelegram(l, title(l.thread)), { reply_markup: kb });
         remember(msg.message_id, l);
       } catch (err) {
-        console.error("[fleet-bridge] forward failed:", (err as Error).message);
-        return; // try again next tick, keep order
+        const n = ((st.failed ??= {})[l.id] ?? 0) + 1;
+        st.failed[l.id] = n;
+        console.error(`[fleet-bridge] forward of ${l.id} failed (${n}/${MAX_FORWARD_FAILURES}):`, (err as Error).message);
+        if (n < MAX_FORWARD_FAILURES) {
+          saveState(st);
+          return; // try again next tick, keep order
+        }
+        // Give up on this one: it stays in the owner's Inbox (fleet mail check / console),
+        // the chat gets a short plain notice, and the letters behind it go through.
+        st.seen.push(l.id);
+        delete st.failed[l.id];
+        saveState(st);
+        await bot.api
+          .sendMessage(chatId, `⚠️ Не смогла переслать письмо ${roleName(l.from)} · ${title(l.thread)} (${(err as Error).message.slice(0, 120)}). Оно лежит в почте: fleet mail read --keep ${l.id}`)
+          .catch(() => {});
       }
     }
   }
@@ -208,7 +230,9 @@ export function installOwnerBridge(
   void forwardNew();
 
   bot.callbackQuery(/^fleet_read:(.+)$/, async (ctx) => {
-    archive(spool, OWNER_ADDRESS, ctx.match[1]);
+    // Token (current messages) or a raw letter id (messages sent before tokens were used).
+    const id = st.tokens?.[ctx.match[1]] ?? ctx.match[1];
+    archive(spool, OWNER_ADDRESS, id);
     await ctx.answerCallbackQuery({ text: "Убрала в архив" });
     await ctx.editMessageReplyMarkup({ reply_markup: undefined }).catch(() => {});
   });
