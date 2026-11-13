@@ -241,3 +241,11 @@ docs/         FLEET.md, ROADMAP.md, PIPELINE.md, KNOWN-LIMITS.md
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — план развития и статус фаз.
 - [`docs/PIPELINE.md`](docs/PIPELINE.md) — подробное устройство конвейера и причины решений.
 - [`docs/KNOWN-LIMITS.md`](docs/KNOWN-LIMITS.md) — известные пределы и что сознательно отложено.
+
+## Running as a service (macOS)
+
+`sh scripts/launchd.sh install` runs the fleet (`fleet run`, under `caffeinate -i`) and the Telegram
+bot as LaunchAgents `kz.xentra.fleet` / `kz.xentra.bot`: started at login, restarted after a crash,
+independent of the terminal. Logs: `~/.xentra-fleet/logs/{fleet,bot}.log`. After `npm run build`,
+restart with `launchctl kickstart -k gui/$(id -u)/kz.xentra.fleet` (and `…/kz.xentra.bot`).
+`sh scripts/launchd.sh status | uninstall`.
