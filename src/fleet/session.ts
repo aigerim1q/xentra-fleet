@@ -19,7 +19,8 @@ export interface ThreadState {
   model: string;
   engine: Role["engine"];
   updatedAt: string;
-  // claude's cumulative total_cost_usd for sessionId — the next resumed run subtracts it.
+  // The last total_cost_usd claude REPORTED for sessionId (never a local estimate) — the next
+  // resumed run subtracts it.
   costTotalUsd?: number;
 }
 
@@ -206,8 +207,11 @@ export const runRoleSession: SessionRunner = async (input) => {
         model: role.model,
         engine: "claude",
         updatedAt: new Date().toISOString(),
-        // The killed run's own estimate on top of what the session had cost before it.
-        costTotalUsd: killed.sessionId === resumeId ? (priorCost ?? 0) + killed.costUsd : killed.costUsd,
+        // Only claude's own reported total is a baseline for the next run. A killed run's
+        // estimate is billed once (costUsd below) and NOT folded in here: claude's next total
+        // comes out below such an inflated baseline, and the whole session total was then
+        // billed again (live 2026-11-13: an 18 s pm run billed $6.23).
+        ...(killed.sessionId === resumeId && priorCost !== undefined ? { costTotalUsd: priorCost } : {}),
       });
     }
     // A resume that points at a session claude no longer has: forget it, next try is fresh.
