@@ -95,6 +95,7 @@ export async function ensureWorkspace(target: RepoTarget, thread: string, opts: 
     } catch {
       /* already there */
     }
+    await excludeNodeModulesLink(dir);
   }
   const meta: WorkspaceMeta = {
     repo: target.kind,
@@ -105,6 +106,20 @@ export async function ensureWorkspace(target: RepoTarget, thread: string, opts: 
   };
   writeFileSync(metaPath(dir), JSON.stringify(meta, null, 2));
   return dir;
+}
+
+// The node_modules symlink must never be committed. A repo's `.gitignore` often says
+// `node_modules/` — with the slash it matches only a directory, and a symlink is a file to
+// git: live 2026-11-13 the first mobile-ai thread committed the link. The repo-wide
+// info/exclude (shared by all worktrees) gets a slash-less pattern.
+export async function excludeNodeModulesLink(dir: string): Promise<void> {
+  const { stdout } = await execFileAsync("git", ["rev-parse", "--git-common-dir"], { cwd: dir });
+  const common = stdout.trim();
+  const file = join(isAbsolute(common) ? common : join(dir, common), "info", "exclude");
+  const current = existsSync(file) ? readFileSync(file, "utf8") : "";
+  if (current.split("\n").some((l) => l.trim() === "/node_modules")) return;
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, `${current}${current && !current.endsWith("\n") ? "\n" : ""}/node_modules\n`);
 }
 
 // False = nothing to commit; a failed commit (hook, index) throws — the supervisor reports it.

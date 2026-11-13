@@ -76,3 +76,24 @@ test("removeInWorkspace deletes files and folders inside the worktree and refuse
     rmSync(base, { recursive: true, force: true });
   }
 });
+
+test("a worktree's node_modules symlink is excluded from commits even when .gitignore says node_modules/", async () => {
+  const base = mkdtempSync(join(tmpdir(), "fleet-nm-"));
+  try {
+    const repoDir = join(base, "repo");
+    mkdirSync(repoDir);
+    const git = (args: string[], cwd = repoDir) => execFileSync("git", args, { cwd, stdio: "pipe" }).toString();
+    git(["init", "-q", "-b", "dev"]);
+    writeFileSync(join(repoDir, ".gitignore"), "node_modules/\n");
+    git(["add", "-A"]);
+    git(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "init"]);
+    mkdirSync(join(repoDir, "node_modules"));
+    process.env.FLEET_HOME = join(base, "home");
+    const dir = await ensureWorkspace({ kind: "mobile", path: repoDir, baseBranch: "dev", gates: [] }, "t-nm", { baselines: false });
+    assert.ok(existsSync(join(dir, "node_modules")));
+    assert.equal(git(["status", "--porcelain"], dir).trim(), "");
+  } finally {
+    delete process.env.FLEET_HOME;
+    rmSync(base, { recursive: true, force: true });
+  }
+});
