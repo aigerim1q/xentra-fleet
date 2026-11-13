@@ -6,7 +6,7 @@ import { DEPUTY_THREAD } from "./deputy.js";
 import { type Letter, type Spool, parseLetter, readInbox } from "./mail.js";
 import { listPushes } from "./pushRequests.js";
 import type { Role } from "./roles.js";
-import { branchFor, workspaceDir, type RepoTarget } from "./workspace.js";
+import { branchFor, FLEET_REPO_KINDS, workspaceDir, type RepoTarget } from "./workspace.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -75,7 +75,7 @@ export function staleThreads(spool: Spool, stateDir: string, roles: Role[], opts
   const out: StaleThread[] = [];
   for (const [thread, { at }] of last) {
     if (at > cutoff || pendingInbox.has(thread) || running.has(thread) || pendingPush.has(thread)) continue;
-    for (const repo of ["backend", "frontend"] as const) {
+    for (const repo of FLEET_REPO_KINDS) {
       if (existsSync(join(workspaceDir(repo, thread), ".git"))) out.push({ thread, repo, lastLetterAt: at });
     }
   }

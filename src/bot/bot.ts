@@ -57,7 +57,7 @@ export function isAuthorizedSender(
 }
 import type { QueueRunOutcome, Brief } from "../types.js";
 
-const REPO_RU: Record<string, string> = { backend: "бэкенд", frontend: "фронтенд", cross: "кросс-репо (бэкенд → фронтенд)" };
+const REPO_RU: Record<string, string> = { backend: "бэкенд", frontend: "фронтенд", mobile: "мобилка", cross: "кросс-репо (бэкенд → фронтенд)" };
 
 function statusTag(status: string | undefined): string {
   if (status === config.jira.inProgressStatus) return "[IN WORK]";

@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import { readJsonDir, readJsonOr, writeJsonAtomic } from "./atomic.js";
+import type { FleetRepoKind } from "./repoKinds.js";
 
 // Push and MR leave the machine, so they happen only on the owner's click, every time
 // (the fleet's "push only with the owner's confirmation" rule). A role asks with
@@ -9,7 +10,7 @@ import { readJsonDir, readJsonOr, writeJsonAtomic } from "./atomic.js";
 
 export interface PushRequest {
   thread: string;
-  repo: "backend" | "frontend";
+  repo: FleetRepoKind;
   dir: string;
   branch: string;
   baseBranch: string;

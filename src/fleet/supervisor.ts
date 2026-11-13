@@ -67,7 +67,7 @@ export interface WorkspaceOps {
 export interface SupervisorOptions {
   spool: Spool;
   roles: Role[];
-  repos: Record<RepoTarget["kind"], RepoTarget | undefined>;
+  repos: Partial<Record<RepoTarget["kind"], RepoTarget>>;
   stateDir: string;
   runSession: SessionRunner;
   workspace: WorkspaceOps;

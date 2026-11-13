@@ -16,8 +16,12 @@ const execFileAsync = promisify(execFile);
 // Gate baselines are taken when the worktree is created — before any edit — so a later
 // <gates/> run compares against the untouched base, like the single-task pipeline.
 
+import type { FleetRepoKind } from "./repoKinds.js";
+
+export { FLEET_REPO_KINDS, type FleetRepoKind } from "./repoKinds.js";
+
 export interface RepoTarget {
-  kind: "backend" | "frontend";
+  kind: FleetRepoKind;
   path: string;
   baseBranch: string;
   gates: GateSpec[];

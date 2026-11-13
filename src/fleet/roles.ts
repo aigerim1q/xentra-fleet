@@ -2,6 +2,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ADDRESS_RE } from "./mail.js";
+import { FLEET_REPO_KINDS, type FleetRepoKind } from "./repoKinds.js";
 
 // Fleet roles, one roles/<role>.json each (plus roles/<role>.md — the role's own
 // instructions — and roles/_protocol.md, shared by every role). Same idea as the CTO
@@ -17,7 +18,7 @@ export interface Role {
   effort?: string; // codex only
   access: "read" | "edit";
   sessionTimeoutMs: number;
-  defaultRepo: "backend" | "frontend";
+  defaultRepo: FleetRepoKind;
   // Empty = anyone may write; otherwise only these senders (others are refused, the
   // sender is told once, the letter archived).
   acceptFrom: string[];
@@ -55,7 +56,7 @@ export function parseRole(raw: unknown, instructions: string): Role {
   if (access !== "read" && access !== "edit") throw new Error(`bad access for ${role}: ${access}`);
   if (engine === "codex" && access === "edit") throw new Error(`${role}: codex roles are read-only`);
   const defaultRepo = (r.defaultRepo ?? "backend") as string;
-  if (defaultRepo !== "backend" && defaultRepo !== "frontend") throw new Error(`bad defaultRepo for ${role}`);
+  if (!(FLEET_REPO_KINDS as readonly string[]).includes(defaultRepo)) throw new Error(`bad defaultRepo for ${role}`);
   const acceptFrom = Array.isArray(r.acceptFrom) ? (r.acceptFrom as unknown[]).map(String) : [];
   for (const a of acceptFrom) if (!ADDRESS_RE.test(a)) throw new Error(`bad acceptFrom address for ${role}: ${a}`);
   return {
@@ -66,7 +67,7 @@ export function parseRole(raw: unknown, instructions: string): Role {
     effort: typeof r.effort === "string" ? r.effort : undefined,
     access,
     sessionTimeoutMs: parseDuration(typeof r.sessionTimeout === "string" ? r.sessionTimeout : "5h"),
-    defaultRepo,
+    defaultRepo: defaultRepo as FleetRepoKind,
     acceptFrom,
     canRequestPush: r.canRequestPush === true,
     isAuditor: r.auditor === true,

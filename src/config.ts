@@ -25,7 +25,7 @@ export interface RepoConfig {
 // (slowest, most redundant with typecheck). Each is opt-in via its own env var so
 // existing setups with only BACKEND_VERIFY_CMD/FRONTEND_VERIFY_CMD configured keep
 // working unchanged — "test" is the only gate with a hardcoded default command.
-function buildGates(prefix: "BACKEND" | "FRONTEND", defaultTestCommand: string): GateSpec[] {
+function buildGates(prefix: "BACKEND" | "FRONTEND" | "MOBILE", defaultTestCommand: string): GateSpec[] {
   const gates: GateSpec[] = [];
   const typecheck = process.env[`${prefix}_GATE_TYPECHECK`];
   if (typecheck) gates.push({ name: "typecheck", command: typecheck });
@@ -84,6 +84,16 @@ export const config = {
       // .test.ts and .test.tsx (see .env.example), so this was silently wrong for
       // every frontend task whose acceptance test needs to render a component.
       acceptanceTestExt: process.env.FRONTEND_ACCEPTANCE_TEST_EXT ?? "test.tsx",
+    },
+    // mobile-ai (Expo, epic MOBILE): role fleet only — the single-task pipeline (queue.ts)
+    // still routes backend/frontend tickets. No device or emulator here: gates are tsc,
+    // expo lint and jest; the native Android build runs in the repo's own CI.
+    mobile: {
+      path: process.env.MOBILE_REPO_PATH ?? "",
+      gates: buildGates("MOBILE", "npx jest --ci"),
+      gitlabProjectPath: process.env.MOBILE_GITLAB_PROJECT ?? "saqr/mobile-ai",
+      acceptanceRunner: process.env.MOBILE_ACCEPTANCE_RUNNER ?? "npx jest",
+      acceptanceTestExt: process.env.MOBILE_ACCEPTANCE_TEST_EXT ?? "test.ts",
     },
   } satisfies Record<string, RepoConfig>,
   // No role here used an explicit --model before — every turn silently inherited

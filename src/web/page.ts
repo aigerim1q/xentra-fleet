@@ -158,7 +158,7 @@ var PHASE_RU = {
   commenting: "комментирование тикета",
 };
 var OUTCOME_RU = { closed: "закрыт", needs_human: "нужен человек", skipped: "пропущен" };
-var REPO_RU = { backend: "бэкенд", frontend: "фронтенд", cross: "кросс-репо", ambiguous: "кросс-репо", unknown: "не определено" };
+var REPO_RU = { backend: "бэкенд", frontend: "фронтенд", mobile: "мобилка", cross: "кросс-репо", ambiguous: "кросс-репо", unknown: "не определено" };
 
 function fmtElapsed(iso) {
   const s = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);

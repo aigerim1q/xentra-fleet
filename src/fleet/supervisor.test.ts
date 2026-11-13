@@ -513,3 +513,29 @@ test("while <gates/> run, gating.<role> marks the role busy; the marker is gone 
   assert.ok(seen, "gating marker present during the gate run");
   assert.ok(!existsSync(join(stateDir, "gating.dev-1")));
 });
+
+test("a letter with repo=mobile works in the mobile-ai worktree", async () => {
+  const kinds: string[] = [];
+  const sup = new Supervisor({
+    spool,
+    roles: [role("dev-1", "edit")],
+    repos: { ...repos, mobile: { kind: "mobile", path: "/mobile", baseBranch: "dev", gates: [] } },
+    stateDir,
+    workspace: {
+      ...ws(),
+      ensure: async (r, thread) => {
+        kinds.push(r.kind);
+        return join(root, "wt", thread);
+      },
+    },
+    backoff: BACKOFF,
+    runSession: async (input): Promise<SessionOutcome> => {
+      const text = `<ack id="${input.batch.primary.id}"/>`;
+      return { ok: true, actions: parseReplyActions(text), resultText: text, costUsd: 0 };
+    },
+  });
+  send(spool, { from: OWNER_ADDRESS, to: ["xentra/dev-1"], subject: "screen", body: "", repo: "mobile" });
+  await drain(sup);
+  assert.deepEqual(kinds, ["mobile"]);
+  assert.equal(parseRole({ role: "m", engine: "claude", model: "x", access: "edit", defaultRepo: "mobile" }, "i").defaultRepo, "mobile");
+});

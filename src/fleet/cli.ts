@@ -38,7 +38,7 @@ async function buildSupervisor(log: (l: string) => void, opts: { limits: boolean
     spool,
     roles,
     threadContext: (thread) => (thread === DEPUTY_THREAD ? fleetSnapshot(spool, stateDir, roles) : undefined),
-    repos: { backend: repo("backend"), frontend: repo("frontend") },
+    repos: { backend: repo("backend"), frontend: repo("frontend"), mobile: repo("mobile") },
     stateDir,
     runSession: runRoleSession,
     workspace: { ensure: ensureWorkspace, commit: commitWorkspace, gates: runWorkspaceGates, diffStat: workspaceDiff, headSha: workspaceHead, changes: workspaceChanges, integrity: workspaceIntegrity, remove: removeInWorkspace },
@@ -165,7 +165,7 @@ export function registerFleetCommands(program: Command): void {
     .requiredOption("--body <text>")
     .option("--thread <id>", "reply into an existing thread")
     .option("--priority <p>", "low|normal|high|urgent", "normal")
-    .option("--repo <name>", "backend|frontend")
+    .option("--repo <name>", "backend|frontend|mobile")
     .option("--key <KEY>", "Jira key, e.g. XEN-55")
     .action((o) => {
       const spool = new Spool();
