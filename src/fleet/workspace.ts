@@ -63,6 +63,7 @@ export function branchFor(thread: string): string {
 export async function ensureWorkspace(target: RepoTarget, thread: string, opts: { baselines: boolean }): Promise<string> {
   const dir = workspaceDir(target.kind, thread);
   if (existsSync(join(dir, ".git"))) {
+    await excludeLocalArtifacts(dir);
     const meta = readMeta(dir);
     if (opts.baselines && meta && meta.baselines === null) {
       // Created earlier by a read-only role (no edits yet, since only edit roles change
@@ -95,8 +96,8 @@ export async function ensureWorkspace(target: RepoTarget, thread: string, opts: 
     } catch {
       /* already there */
     }
-    await excludeNodeModulesLink(dir);
   }
+  await excludeLocalArtifacts(dir);
   const meta: WorkspaceMeta = {
     repo: target.kind,
     thread,
@@ -108,18 +109,27 @@ export async function ensureWorkspace(target: RepoTarget, thread: string, opts: 
   return dir;
 }
 
-// The node_modules symlink must never be committed. A repo's `.gitignore` often says
-// `node_modules/` — with the slash it matches only a directory, and a symlink is a file to
-// git: live 2026-11-13 the first mobile-ai thread committed the link. The repo-wide
-// info/exclude (shared by all worktrees) gets a slash-less pattern.
-export async function excludeNodeModulesLink(dir: string): Promise<void> {
+// Local, never-committed paths of a worktree, kept out of every fleet commit
+// (commitWorkspace stages everything).
+//  - /node_modules: the symlink to the main checkout. A repo's `.gitignore` often says
+//    `node_modules/` — with the slash it matches only a directory, and a symlink is a file to
+//    git: live 2026-11-13 the first mobile-ai thread committed the link. Hence slash-less.
+//  - /.agents/, /.codex/: local AI-tool settings and skills, untracked in the repos. Live
+//    2026-11-13 a back-ai thread (XEN-849) committed .agents/; its sample `sk_live_…` keys
+//    turned gitleaks red on the MR and the commit stayed in dev's history.
+// The repo-wide info/exclude (shared by all worktrees) holds the patterns.
+export const LOCAL_EXCLUDES = ["/node_modules", "/.agents/", "/.codex/"] as const;
+
+export async function excludeLocalArtifacts(dir: string): Promise<void> {
   const { stdout } = await execFileAsync("git", ["rev-parse", "--git-common-dir"], { cwd: dir });
   const common = stdout.trim();
   const file = join(isAbsolute(common) ? common : join(dir, common), "info", "exclude");
   const current = existsSync(file) ? readFileSync(file, "utf8") : "";
-  if (current.split("\n").some((l) => l.trim() === "/node_modules")) return;
+  const have = new Set(current.split("\n").map((l) => l.trim()));
+  const missing = LOCAL_EXCLUDES.filter((p) => !have.has(p));
+  if (missing.length === 0) return;
   mkdirSync(dirname(file), { recursive: true });
-  writeFileSync(file, `${current}${current && !current.endsWith("\n") ? "\n" : ""}/node_modules\n`);
+  writeFileSync(file, `${current}${current && !current.endsWith("\n") ? "\n" : ""}${missing.join("\n")}\n`);
 }
 
 // False = nothing to commit; a failed commit (hook, index) throws — the supervisor reports it.

@@ -97,3 +97,33 @@ test("a worktree's node_modules symlink is excluded from commits even when .giti
     rmSync(base, { recursive: true, force: true });
   }
 });
+
+test("local AI-tool folders (.agents/, .codex/) never show up as changes, also in an existing worktree", async () => {
+  const base = mkdtempSync(join(tmpdir(), "fleet-ai-"));
+  try {
+    const repoDir = join(base, "repo");
+    mkdirSync(repoDir);
+    const git = (args: string[], cwd = repoDir) => execFileSync("git", args, { cwd, stdio: "pipe" }).toString();
+    git(["init", "-q", "-b", "dev"]);
+    writeFileSync(join(repoDir, "README.md"), "x\n");
+    git(["add", "-A"]);
+    git(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "init"]);
+    process.env.FLEET_HOME = join(base, "home");
+    const target = { kind: "backend" as const, path: repoDir, baseBranch: "dev", gates: [] };
+    const dir = await ensureWorkspace(target, "t-ai", { baselines: false });
+    for (const d of [".agents", ".codex"]) {
+      mkdirSync(join(dir, d, "skills"), { recursive: true });
+      writeFileSync(join(dir, d, "skills", "x.md"), "const API_KEY = 'sk_live_1234567890abcdef'\n");
+    }
+    assert.equal(git(["status", "--porcelain"], dir).trim(), "");
+    // A worktree created before the rule: the exclude is re-applied on reuse.
+    const exclude = join(repoDir, ".git", "info", "exclude");
+    writeFileSync(exclude, "/node_modules\n");
+    assert.notEqual(git(["status", "--porcelain"], dir).trim(), "");
+    await ensureWorkspace(target, "t-ai", { baselines: false });
+    assert.equal(git(["status", "--porcelain"], dir).trim(), "");
+  } finally {
+    delete process.env.FLEET_HOME;
+    rmSync(base, { recursive: true, force: true });
+  }
+});
