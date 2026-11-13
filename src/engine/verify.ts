@@ -17,7 +17,24 @@ const OUTPUT_CAP = 1024 * 1024 * 20;
 // test could read JIRA_PAT/GITLAB_TOKEN/TELEGRAM_BOT_TOKEN from process.env and
 // send them out, bypassing buildAgentEnv entirely. Output is scrubbed too: it goes
 // back into the agent's prompt and, on needs-human, to Telegram.
+// Jest takes every core by default; on the owner's laptop that is a frozen machine. Unless the
+// command already says otherwise, jest gates run with --maxWorkers (FLEET_JEST_MAX_WORKERS, 2).
+export function capJestWorkers(command: string, workers = process.env.FLEET_JEST_MAX_WORKERS ?? "2"): string {
+  if (/--maxWorkers|-w\s/.test(command)) return command;
+  return `${command} --maxWorkers=${workers}`;
+}
+
+// One gate command at a time across the whole process (all threads, the pipeline, baselines):
+// a full jest/tsc/build run eats several GB of RAM, and two of them in parallel froze the
+// owner's laptop (2026-11-13). Queued commands wait; their timeout starts when they run.
+let gateQueue: Promise<unknown> = Promise.resolve();
 export function runRaw(cwd: string, command: string, timeoutMs = DEFAULT_GATE_TIMEOUT_MS): Promise<{ exitedZero: boolean; output: string; timedOut: boolean }> {
+  const run = gateQueue.then(() => runRawNow(cwd, command, timeoutMs));
+  gateQueue = run.catch(() => undefined);
+  return run;
+}
+
+function runRawNow(cwd: string, command: string, timeoutMs: number): Promise<{ exitedZero: boolean; output: string; timedOut: boolean }> {
   const scrub = (text: string) => scrubSecrets(text, secretValues());
   return new Promise((resolve) => {
     const child = spawn(command, { cwd, shell: true, detached: true, env: buildRepoCodeEnv(), stdio: ["ignore", "pipe", "pipe"] });

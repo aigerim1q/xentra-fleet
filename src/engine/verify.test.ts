@@ -157,3 +157,27 @@ test("a gate that runs past its time limit fails with a clear note, and its whol
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("capJestWorkers adds --maxWorkers unless the command already sets it", async () => {
+  const { capJestWorkers } = await import("./verify.js");
+  assert.equal(capJestWorkers("yarn test", "2"), "yarn test --maxWorkers=2");
+  assert.equal(capJestWorkers("npx jest --ci", "2"), "npx jest --ci --maxWorkers=2");
+  assert.equal(capJestWorkers("yarn test --maxWorkers=1", "2"), "yarn test --maxWorkers=1");
+});
+
+test("gate commands never run in parallel — the second waits for the first", async () => {
+  const { runRaw } = await import("./verify.js");
+  const { mkdtemp, rm, readFile } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const dir = await mkdtemp(join(tmpdir(), "gate-serial-"));
+  try {
+    // Each command appends start/end marks; serial execution means no interleaving.
+    const cmd = (n: number) => `echo s${n} >> log; sleep 0.3; echo e${n} >> log`;
+    await Promise.all([runRaw(dir, cmd(1)), runRaw(dir, cmd(2)), runRaw(dir, cmd(3))]);
+    const log = (await readFile(join(dir, "log"), "utf8")).trim().split("\n");
+    assert.deepEqual(log, ["s1", "e1", "s2", "e2", "s3", "e3"]);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

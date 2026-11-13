@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { capJestWorkers } from "./engine/verify.js";
 import type { GateSpec } from "./types.js";
 
 function requireEnv(name: string): string {
@@ -25,13 +26,14 @@ export interface RepoConfig {
 // (slowest, most redundant with typecheck). Each is opt-in via its own env var so
 // existing setups with only BACKEND_VERIFY_CMD/FRONTEND_VERIFY_CMD configured keep
 // working unchanged — "test" is the only gate with a hardcoded default command.
-function buildGates(prefix: "BACKEND" | "FRONTEND" | "MOBILE", defaultTestCommand: string): GateSpec[] {
+function buildGates(prefix: "BACKEND" | "FRONTEND" | "MOBILE", defaultTestCommand: string, jest = false): GateSpec[] {
   const gates: GateSpec[] = [];
   const typecheck = process.env[`${prefix}_GATE_TYPECHECK`];
   if (typecheck) gates.push({ name: "typecheck", command: typecheck });
   const lint = process.env[`${prefix}_GATE_LINT`];
   if (lint) gates.push({ name: "lint", command: lint });
-  gates.push({ name: "test", command: process.env[`${prefix}_VERIFY_CMD`] ?? defaultTestCommand });
+  const test = process.env[`${prefix}_VERIFY_CMD`] ?? defaultTestCommand;
+  gates.push({ name: "test", command: jest ? capJestWorkers(test) : test });
   const build = process.env[`${prefix}_GATE_BUILD`];
   if (build) gates.push({ name: "build", command: build });
   return gates;
@@ -66,7 +68,7 @@ export const config = {
   repos: {
     backend: {
       path: process.env.BACKEND_REPO_PATH ?? "",
-      gates: buildGates("BACKEND", "yarn test"),
+      gates: buildGates("BACKEND", "yarn test", true),
       gitlabProjectPath: process.env.BACKEND_GITLAB_PROJECT ?? "saqr/back-ai",
       acceptanceRunner: process.env.BACKEND_ACCEPTANCE_RUNNER ?? "npx jest",
       acceptanceTestExt: process.env.BACKEND_ACCEPTANCE_TEST_EXT ?? "spec.ts",
@@ -90,7 +92,7 @@ export const config = {
     // expo lint and jest; the native Android build runs in the repo's own CI.
     mobile: {
       path: process.env.MOBILE_REPO_PATH ?? "",
-      gates: buildGates("MOBILE", "npx jest --ci"),
+      gates: buildGates("MOBILE", "npx jest --ci", true),
       gitlabProjectPath: process.env.MOBILE_GITLAB_PROJECT ?? "saqr/mobile-ai",
       acceptanceRunner: process.env.MOBILE_ACCEPTANCE_RUNNER ?? "npx jest",
       acceptanceTestExt: process.env.MOBILE_ACCEPTANCE_TEST_EXT ?? "test.ts",
